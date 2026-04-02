@@ -11,6 +11,38 @@ Garmin watches store golf activity data in two separate FIT files per round:
 
 This app reads both files, links them by timestamp, and presents a combined view of golf performance and health data.
 
+## Features
+
+### Overview Tab
+Round summary with score, distance walked, calories, avg/max HR, altitude range, and avg swing tempo. Includes a hole-by-hole scorecard with color-coded results (eagle/birdie/par/bogey), GIR, fairways hit, and a health section showing Body Battery drain, stress, and HR zone breakdown.
+
+### Shot Map Tab
+Interactive Leaflet map showing every shot as a colored line and dot, color-coded by club category (Driver, Fairway Wood, Iron, Wedge, Putter). Features:
+- Hole selector buttons to zoom into individual holes
+- Club abbreviation labels (`Dr`, `W3`, `I7`, `PW`, `H` etc.) next to each shot dot
+- Distance in yards on each shot line
+- Putt count shown inline next to each hole number marker
+- Hover popups on shots, labels, and hole markers showing club, distance, HR, altitude, and swing tempo
+- Scroll/double-click zoom disabled — use `+`/`−` buttons only
+- Round Timeline chart below the map showing HR, altitude, stress, and swing tempo over time with hole markers
+
+![Shot Map](images/shotmap1.png)
+![Shot Map — hole detail](images/shotmap2.png)
+
+### Course Stats Tab
+Breakdown of tee shots, approach shots, wedges, and putting with direction analysis (left/straight/right), avg/max distance, and a club summary table.
+
+![Course Stats](images/coursestats1.png)
+![Course Stats — club summary](images/coursestats2.png)
+
+### Swing Tempo
+Swing tempo is captured from mesg #104 in the activity FIT file as a 5-minute rolling average. The ratio (backswing:downswing) is displayed in the round header, on the timeline chart as green dots, and in individual shot popups when available.
+
+### Ask AI
+The ✨ Ask AI button builds a comprehensive markdown prompt from all round data — scorecard, shot details, swing tempo, and a full 1-minute health timeline (HR, altitude, stress, tempo) — and copies it to the clipboard ready to paste into [Gemini](https://gemini.google.com) or [ChatGPT](https://chatgpt.com).
+
+![Ask AI](images/ask-ai.png)
+
 ## Download
 
 Pre-built macOS binaries are available on the [Releases page](https://github.com/nicechester/garmin-golf-analyzier/releases).
@@ -19,14 +51,6 @@ Pre-built macOS binaries are available on the [Releases page](https://github.com
 
 ### Overview
 ![Overview](images/overview.png)
-
-### Shot Map
-![Shot Map](images/shotmap1.png)
-![Shot Map — hole detail](images/shotmap2.png)
-
-### Course Stats
-![Course Stats](images/coursestats1.png)
-![Course Stats — club summary](images/coursestats2.png)
 
 ## Architecture
 
