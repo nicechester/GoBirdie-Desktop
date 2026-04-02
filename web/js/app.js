@@ -802,12 +802,11 @@ function renderShotMap(round) {
         const cat  = shot.club_category ?? '';
         if (cat === 'putt') return 'P';
         if (!name) return cat.slice(0,1).toUpperCase();
-        // e.g. "Driver"->"Dr", "3-Wood"->"W3", "7-Iron"->"I7", "PW"->"PW", "SW"->"SW"
-        const m = name.match(/^(\d+)[-\s]?(Wood|Iron|W|I)/i);
-        if (m) return (name.includes('Iron') || name.includes('I') ? 'I' : 'W') + m[1];
+        const m = name.match(/^(\d+)[-\s]?(Wood|Iron)/i);
+        if (m) return (name.toLowerCase().includes('iron') ? 'I' : 'W') + m[1];
         if (name.length <= 3) return name;
         if (name === 'Driver') return 'Dr';
-        if (name === 'Hybrid') return 'Hy';
+        if (name === 'Hybrid') return 'U7';  // utility/hybrid
         return name.slice(0, 2);
     }
 
@@ -881,11 +880,11 @@ function renderShotMap(round) {
             L.marker([shot.from.lat, shot.from.lon], {
                 icon: L.divIcon({
                     className: '',
-                    html: `<div style="font-size:9px;font-weight:700;color:${color};
-                        background:rgba(255,255,255,0.85);border-radius:3px;
-                        padding:0 2px;white-space:nowrap;pointer-events:none;
+                    html: `<div style="font-size:12px;font-weight:700;color:${color};
+                        background:rgba(255,255,255,0.9);border-radius:3px;
+                        padding:1px 3px;white-space:nowrap;pointer-events:none;
                         text-shadow:0 0 2px white;line-height:1.4">${abbr}</div>`,
-                    iconSize: [24, 14], iconAnchor: [-6, 7],
+                    iconSize: [30, 18], iconAnchor: [-7, 9],
                 }),
                 interactive: false,
             }).addTo(labelLayer);
@@ -900,11 +899,11 @@ function renderShotMap(round) {
                 L.marker(mid, {
                     icon: L.divIcon({
                         className: '',
-                        html: `<div style="font-size:8px;color:#374151;
-                            background:rgba(255,255,255,0.85);border-radius:3px;
-                            padding:0 2px;white-space:nowrap;pointer-events:none;
+                        html: `<div style="font-size:11px;color:#111827;
+                            background:rgba(255,255,255,0.9);border-radius:3px;
+                            padding:1px 3px;white-space:nowrap;pointer-events:none;
                             line-height:1.4">${yds}y</div>`,
-                        iconSize: [28, 12], iconAnchor: [14, 6],
+                        iconSize: [34, 16], iconAnchor: [17, 8],
                     }),
                     interactive: false,
                 }).addTo(labelLayer);
