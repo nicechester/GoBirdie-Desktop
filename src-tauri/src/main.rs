@@ -65,22 +65,14 @@ async fn sync_rounds(
     if let Some(first) = entries.first() {
         if !first.clubs_path.is_empty() {
             let cp = Path::new(&first.clubs_path);
-            eprintln!("[clubs] clubs_path={} exists={}", first.clubs_path, cp.exists());
             if cp.exists() {
                 match parser::parse_clubs(cp) {
                     Ok(loaded) => {
-                        eprintln!("[clubs] loaded {} clubs", loaded.len());
-                        for c in &loaded {
-                            eprintln!("  id={} name={} type={:?} avg_dist_cm={}",
-                                c.club_id, c.name, c.club_type, c.avg_distance_cm);
-                        }
                         *state.clubs.lock().unwrap() = loaded;
                     }
-                    Err(e) => eprintln!("[clubs] parse error: {}", e),
+                    Err(e) => eprintln!("clubs parse error: {}", e),
                 }
             }
-        } else {
-            eprintln!("[clubs] clubs_path is empty");
         }
     }
 

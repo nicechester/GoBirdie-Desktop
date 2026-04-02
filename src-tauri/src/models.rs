@@ -162,14 +162,13 @@ pub struct ShotPosition {
     pub from: GpsPoint,
     pub to: GpsPoint,
     pub club_id: u64,
-    // Enriched after club lookup
     pub club_name: Option<String>,
     pub club_category: Option<String>,
-    pub distance_meters: Option<f64>,   // computed from GPS
-    // Enriched from activity health timeline
+    pub distance_meters: Option<f64>,
     pub heart_rate: Option<u8>,
     pub altitude_meters: Option<f64>,
     pub swing_tempo: Option<f32>,
+    pub timestamp: Option<i64>,   // Garmin epoch, matched from health timeline
 }
 
 // ── Scorecard ────────────────────────────────────────────────────────────────

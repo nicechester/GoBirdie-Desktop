@@ -295,12 +295,13 @@ function renderTimelineChart(round) {
     if (!canvas) return;
     if (activeChart) { activeChart.destroy(); activeChart = null; }
 
-    const GARMIN_EPOCH = 631065600;
+
 
     // Downsample to max 300 points
     const samples = round.health_timeline;
     const step = Math.max(1, Math.floor(samples.length / 300));
     const pts = samples.filter((_, i) => i % step === 0);
+    activeTimelinePts = pts; // store for shot indicator
 
     const labels     = pts.map(s => {
         const d = new Date((s.timestamp + GARMIN_EPOCH) * 1000);
@@ -342,11 +343,13 @@ function renderTimelineChart(round) {
         });
     }
 
-    // Inline plugin: draw vertical lines + labels for each hole marker
+    // Inline plugin: hole markers + shot indicator
+    let shotIndicatorIdx = null;
     const holeLinePlugin = {
         id: 'holeLines',
         afterDraw(chart) {
             const { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
+            // Hole markers
             activeHoleMarkers.forEach(({ index, label }) => {
                 const xPos = x.getPixelForValue(index);
                 if (xPos < x.left || xPos > x.right) return;
@@ -358,7 +361,6 @@ function renderTimelineChart(round) {
                 ctx.lineWidth = 1;
                 ctx.setLineDash([4, 3]);
                 ctx.stroke();
-                // Label
                 ctx.setLineDash([]);
                 ctx.font = '9px sans-serif';
                 ctx.fillStyle = '#6366f1';
@@ -366,7 +368,34 @@ function renderTimelineChart(round) {
                 ctx.fillText(label, xPos, top + 10);
                 ctx.restore();
             });
+            // Shot indicator — yellow diamond
+            if (shotIndicatorIdx !== null) {
+                const xPos = x.getPixelForValue(shotIndicatorIdx);
+                if (xPos >= x.left && xPos <= x.right) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(xPos, top);
+                    ctx.lineTo(xPos, bottom);
+                    ctx.strokeStyle = 'rgba(234,179,8,0.9)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.fillStyle = 'rgb(234,179,8)';
+                    ctx.beginPath();
+                    ctx.moveTo(xPos,     top + 4);
+                    ctx.lineTo(xPos + 5, top + 9);
+                    ctx.lineTo(xPos,     top + 14);
+                    ctx.lineTo(xPos - 5, top + 9);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
         }
+    };
+    // Expose so showShotOnTimeline can trigger a redraw
+    window._setShotIndicator = (idx) => {
+        shotIndicatorIdx = idx;
+        if (activeChart) activeChart.draw();
     };
 
     activeChart = new Chart(canvas, {
@@ -441,6 +470,20 @@ function renderTimelineChart(round) {
             }
         }
     });
+}
+
+// Show a shot's position on the timeline chart as a yellow indicator.
+function showShotOnTimeline(shot) {
+    if (!shot.timestamp || !activeTimelinePts.length) return;
+    // Find closest downsampled point by timestamp
+    let closestIdx = 0, closestDiff = Infinity;
+    activeTimelinePts.forEach((s, i) => {
+        const diff = Math.abs(s.timestamp - shot.timestamp);
+        if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
+    });
+    if (window._setShotIndicator) window._setShotIndicator(closestIdx);
+    // Scroll timeline into view
+    document.getElementById('timeline-chart')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // Zoom the timeline chart to a hole's time window, or reset to full round.
@@ -626,7 +669,9 @@ function buildShotMap(round) {
                 ${holeButtons}
             </div>
         </div>
-        <div id="shot-map"></div>
+        <div id="shot-map-wrapper">
+            <div id="shot-map"></div>
+        </div>
         <div id="shot-legend" class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500"></div>
     </div>
     <div class="bg-white rounded-xl shadow-sm border p-6">
@@ -680,6 +725,10 @@ function renderShotMap(round) {
         maxZoom: 19,
     }).addTo(activeMap);
 
+    // Invalidate map size on window resize to maintain aspect ratio
+    const resizeObserver = new ResizeObserver(() => activeMap?.invalidateSize());
+    resizeObserver.observe(document.getElementById('shot-map-wrapper'));
+
     // Layer groups per hole for filtering
     const holeLayers = {};
     sc.hole_scores.forEach(hs => { holeLayers[hs.hole_number] = L.layerGroup().addTo(activeMap); });
@@ -720,10 +769,9 @@ function renderShotMap(round) {
         circle.bindPopup(popupLines);
         line.bindPopup(popupLines);
 
-        // On click, highlight this shot's time on the timeline
-        const shotTs = shot.heart_rate != null ? shot : null;
-        circle.on('click', () => highlightShotOnTimeline(shot, pts, GARMIN_EPOCH));
-        line.on('click',   () => highlightShotOnTimeline(shot, pts, GARMIN_EPOCH));
+        // On click: show popup AND highlight on timeline
+        circle.on('click', () => { circle.openPopup(); showShotOnTimeline(shot); });
+        line.on('click',   () => { line.openPopup();   showShotOnTimeline(shot); });
 
         // Arrowhead at destination
         L.circleMarker([shot.to.lat, shot.to.lon], {

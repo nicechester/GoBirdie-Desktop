@@ -326,6 +326,7 @@ pub fn parse_scorecard(path: &Path) -> Result<Scorecard, String> {
                         club_name: None, club_category: None,
                         distance_meters: dist,
                         heart_rate: None, altitude_meters: None, swing_tempo: None,
+                        timestamp: None,
                     });
                 }
             }
@@ -354,9 +355,6 @@ pub fn enrich_shots(scorecard: &mut Scorecard, clubs: &[ClubInfo], health: &[Hea
     let club_map: std::collections::HashMap<u64, &ClubInfo> =
         clubs.iter().map(|c| (c.club_id, c)).collect();
 
-    eprintln!("[enrich] {} clubs in map, {} hole_scores",
-        club_map.len(), scorecard.hole_scores.len());
-
     // Build health index by timestamp
     let health_index: BTreeMap<i64, usize> = health.iter().enumerate()
         .map(|(i, s)| (s.timestamp, i)).collect();
@@ -377,12 +375,12 @@ pub fn enrich_shots(scorecard: &mut Scorecard, clubs: &[ClubInfo], health: &[Hea
     // to find the nearest health sample
     for hs in &mut scorecard.hole_scores {
         for shot in &mut hs.shots {
-            // Enrich with club info
-            if let Some(club) = club_map.get(&shot.club_id) {
-                shot.club_name     = Some(club.name.clone());
-                shot.club_category = Some(club.club_type.category().to_string());
-            } else {
-                eprintln!("[enrich] no club for id={} (0x{:08X})", shot.club_id, shot.club_id);
+            // Enrich with club info (skip id=0 = no club recorded)
+            if shot.club_id > 0 {
+                if let Some(club) = club_map.get(&shot.club_id) {
+                    shot.club_name     = Some(club.name.clone());
+                    shot.club_category = Some(club.club_type.category().to_string());
+                }
             }
             // Find nearest health sample by GPS proximity to shot.from
             let mut best_ts: Option<i64> = None;
@@ -400,6 +398,7 @@ pub fn enrich_shots(scorecard: &mut Scorecard, clubs: &[ClubInfo], health: &[Hea
                 if let Some(sample) = nearest_health(ts) {
                     shot.heart_rate      = sample.heart_rate;
                     shot.altitude_meters = sample.altitude_meters;
+                    shot.timestamp       = Some(sample.timestamp);
                 }
             }
         }
