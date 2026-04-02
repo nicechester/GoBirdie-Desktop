@@ -49,11 +49,15 @@ pub fn download_rounds(dest_dir: &Path, count: usize, offset: usize) -> Result<V
 }
 
 fn find_binary() -> Result<PathBuf, String> {
+    let native_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/native");
     let candidates = [
+        // bundled: next to the app executable (with arch suffix)
         std::env::current_exe().ok()
-            .and_then(|p| p.parent().map(|d| d.join("garmin_mtp"))),
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src/native/garmin_mtp")),
+            .and_then(|p| p.parent().map(|d| d.join(format!("garmin_mtp-{}", env!("TAURI_ENV_TARGET_TRIPLE"))))),
+        // dev: compiled with arch suffix in native dir
+        Some(native_dir.join(format!("garmin_mtp-{}", env!("TAURI_ENV_TARGET_TRIPLE")))),
+        // fallback: unsuffixed in native dir
+        Some(native_dir.join("garmin_mtp")),
         Some(PathBuf::from("/usr/local/bin/garmin_mtp")),
     ];
     for candidate in candidates.into_iter().flatten() {
