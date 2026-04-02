@@ -11,6 +11,19 @@ Garmin watches store golf activity data in two separate FIT files per round:
 
 This app reads both files, links them by timestamp, and presents a combined view of golf performance and health data.
 
+## Screenshots
+
+### Overview
+![Overview](images/overview.png)
+
+### Shot Map
+![Shot Map](images/shotmap1.png)
+![Shot Map — hole detail](images/shotmap2.png)
+
+### Course Stats
+![Course Stats](images/coursestats1.png)
+![Course Stats — club summary](images/coursestats2.png)
+
 ## Architecture
 
 ```
