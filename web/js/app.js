@@ -862,15 +862,17 @@ function renderShotMap(round) {
         const onOver = () => {
             const pt = activeMap.latLngToContainerPoint(circle.getLatLng());
             const above = pt.y > 120;
-            popup.options.offset = L.point(0, above ? -10 : 10);
-            circle.openPopup();
-            popup.update();
+            // Shift popup anchor: above dot normally, below dot when near top
+            const anchorPt = L.point(pt.x, above ? pt.y - 8 : pt.y + 8);
+            const anchorLatLng = activeMap.containerPointToLatLng(anchorPt);
+            popup.options.offset = L.point(0, 0);
+            popup.setLatLng(anchorLatLng).openOn(activeMap);
             showShotOnTimeline(shot);
         };
-        const onOut  = () => { circle.closePopup(); clearShotIndicator(); };
+        const onOut = () => { activeMap.closePopup(popup); clearShotIndicator(); };
         circle.on('mouseover', onOver).on('mouseout', onOut);
-        line.on('mouseover',   () => { line.openPopup(); showShotOnTimeline(shot); })
-            .on('mouseout',    onOut);
+        line.on('mouseover', () => { const pt = activeMap.latLngToContainerPoint(circle.getLatLng()); const above = pt.y > 120; const anchorPt = L.point(pt.x, above ? pt.y - 8 : pt.y + 8); popup.setLatLng(activeMap.containerPointToLatLng(anchorPt)).openOn(activeMap); showShotOnTimeline(shot); })
+            .on('mouseout', onOut);
 
         // Arrowhead dot at destination (skip for putts — destination is the hole)
         if (!isPutt) {
@@ -963,11 +965,11 @@ function renderShotMap(round) {
         marker.bindPopup(holePopup);
         marker.on('mouseover', () => {
             const pt = activeMap.latLngToContainerPoint(marker.getLatLng());
-            holePopup.options.offset = L.point(0, pt.y > 120 ? -10 : 10);
-            marker.openPopup();
-            holePopup.update();
+            const above = pt.y > 120;
+            const anchorPt = L.point(pt.x, above ? pt.y - 8 : pt.y + 8);
+            holePopup.setLatLng(activeMap.containerPointToLatLng(anchorPt)).openOn(activeMap);
         });
-        marker.on('mouseout',  () => marker.closePopup());
+        marker.on('mouseout', () => activeMap.closePopup(holePopup));
     });
 
     // Legend
