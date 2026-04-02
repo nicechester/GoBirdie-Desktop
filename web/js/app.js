@@ -806,7 +806,7 @@ function renderShotMap(round) {
         if (m) return (name.toLowerCase().includes('iron') ? 'I' : 'W') + m[1];
         if (name.length <= 3) return name;
         if (name === 'Driver') return 'Dr';
-        if (name === 'Hybrid') return 'U7';  // utility/hybrid
+        if (name === 'Hybrid') return 'H';
         return name.slice(0, 2);
     }
 
