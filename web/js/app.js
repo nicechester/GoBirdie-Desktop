@@ -781,6 +781,7 @@ function renderShotMap(round) {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19,
+        maxNativeZoom: 19,
     }).addTo(activeMap);
 
     // Invalidate map size on window resize to maintain aspect ratio
@@ -1004,7 +1005,7 @@ function renderShotMap(round) {
                     activeMap.fitBounds([
                         [Math.min(...hlats), Math.min(...hlons)],
                         [Math.max(...hlats), Math.max(...hlons)],
-                    ], { padding: [50, 50], maxZoom: 18 });
+                    ], { padding: [20, 20], maxZoom: 19 });
                 }
             }
 
