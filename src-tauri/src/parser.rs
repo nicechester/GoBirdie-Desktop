@@ -12,6 +12,7 @@ const MESG_PLAYER:     u16 = 191;
 const MESG_HOLE_SCORE: u16 = 192;
 const MESG_HOLE_DEF:   u16 = 193;
 const MESG_SHOT_POS:   u16 = 194;
+const MESG_CLUB_DEF:   u16 = 173;
 
 fn field_u64(record: &FitDataRecord, num: u8) -> Option<u64> {
     record.fields().iter().find(|f| f.number() == num).and_then(|f| match f.value() {
@@ -32,7 +33,6 @@ fn field_i64(record: &FitDataRecord, num: u8) -> Option<i64> {
         Value::UInt8(v)  => Some(*v as i64),
         Value::UInt16(v) => Some(*v as i64),
         Value::UInt32(v) => Some(*v as i64),
-        // fitparser decodes known timestamp fields as Timestamp — convert to Garmin epoch
         Value::Timestamp(t) => Some(t.timestamp() - GARMIN_EPOCH_OFFSET),
         _ => None,
     })
@@ -46,15 +46,14 @@ fn field_f32(record: &FitDataRecord, num: u8) -> Option<f32> {
     })
 }
 
-// Returns any numeric field as f32, including signed types
 fn field_any_f32(record: &FitDataRecord, num: u8) -> Option<f32> {
     record.fields().iter().find(|f| f.number() == num).and_then(|f| match f.value() {
-        Value::UInt8(v)  => Some(*v as f32),
-        Value::UInt16(v) => Some(*v as f32),
-        Value::UInt32(v) => Some(*v as f32),
-        Value::SInt8(v)  => Some(*v as f32),
-        Value::SInt16(v) => Some(*v as f32),
-        Value::SInt32(v) => Some(*v as f32),
+        Value::UInt8(v)   => Some(*v as f32),
+        Value::UInt16(v)  => Some(*v as f32),
+        Value::UInt32(v)  => Some(*v as f32),
+        Value::SInt8(v)   => Some(*v as f32),
+        Value::SInt16(v)  => Some(*v as f32),
+        Value::SInt32(v)  => Some(*v as f32),
         Value::Float32(v) => Some(*v),
         Value::Float64(v) => Some(*v as f32),
         _ => None,
@@ -68,6 +67,14 @@ fn field_str(record: &FitDataRecord, num: u8) -> Option<String> {
     })
 }
 
+fn field_enum_u8(record: &FitDataRecord, num: u8) -> Option<u8> {
+    record.fields().iter().find(|f| f.number() == num).and_then(|f| match f.value() {
+        Value::Enum(v)  => Some(*v),
+        Value::UInt8(v) => Some(*v),
+        _ => None,
+    })
+}
+
 fn mesg_num(record: &FitDataRecord) -> u16 {
     match record.kind() {
         MesgNum::Session     => MESG_SESSION,
@@ -77,6 +84,35 @@ fn mesg_num(record: &FitDataRecord) -> u16 {
         _ => 0,
     }
 }
+
+// ── Clubs.fit parser ─────────────────────────────────────────────────────────
+
+pub fn parse_clubs(path: &Path) -> Result<Vec<ClubInfo>, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
+    let records = fitparser::from_reader(&mut file)
+        .map_err(|e| format!("FIT parse error: {}", e))?;
+
+    let mut clubs = Vec::new();
+    for record in &records {
+        if mesg_num(record) == MESG_CLUB_DEF {
+            let club_id      = field_u64(record, 1).unwrap_or(0);
+            let type_enum    = field_enum_u8(record, 2).unwrap_or(0);
+            let custom_name  = field_str(record, 3).unwrap_or_default();
+            let avg_dist_cm  = field_u64(record, 6).unwrap_or(0) as u32;
+            let club_type    = ClubType::from_enum(type_enum);
+            let name = if custom_name.is_empty() {
+                club_type.name().to_string()
+            } else {
+                custom_name
+            };
+            clubs.push(ClubInfo { club_id, club_type, name, avg_distance_cm: avg_dist_cm });
+        }
+    }
+    Ok(clubs)
+}
+
+// ── Activity parser ──────────────────────────────────────────────────────────
 
 pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
     let mut file = std::fs::File::open(path)
@@ -95,27 +131,22 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
     let mut descent: Option<u16> = None;
     let mut health: Vec<HealthSample> = Vec::new();
     let mut raw_shots: Vec<(i64, bool)> = Vec::new();
-
-    // Altitude tracking from gps_metadata (more accurate than record)
     let mut alt_min: Option<f32> = None;
     let mut alt_max: Option<f32> = None;
-
-    // Swing tempo from mesg #104: f2=backswing units, f3=downswing units
-    // Fires every ~5 minutes as a running average
     let mut tempo_samples: Vec<f32> = Vec::new();
 
     for record in &records {
         match mesg_num(record) {
             MESG_SESSION => {
-                if let Some(v) = field_i64(record, 2)  { start_ts = v; }
+                if let Some(v) = field_i64(record, 2)   { start_ts = v; }
                 if let Some(v) = field_i64(record, 253) { end_ts = v; }
-                if let Some(v) = field_f32(record, 8)  { duration = v; }
-                if let Some(v) = field_f32(record, 9)  { distance = v; }
-                if let Some(v) = field_u64(record, 11) { calories = Some(v as u16); }
-                if let Some(v) = field_u64(record, 16) { avg_hr = Some(v as u8); }
-                if let Some(v) = field_u64(record, 17) { max_hr = Some(v as u8); }
-                if let Some(v) = field_u64(record, 22) { ascent = Some(v as u16); }
-                if let Some(v) = field_u64(record, 23) { descent = Some(v as u16); }
+                if let Some(v) = field_f32(record, 8)   { duration = v; }
+                if let Some(v) = field_f32(record, 9)   { distance = v; }
+                if let Some(v) = field_u64(record, 11)  { calories = Some(v as u16); }
+                if let Some(v) = field_u64(record, 16)  { avg_hr = Some(v as u8); }
+                if let Some(v) = field_u64(record, 17)  { max_hr = Some(v as u8); }
+                if let Some(v) = field_u64(record, 22)  { ascent = Some(v as u16); }
+                if let Some(v) = field_u64(record, 23)  { descent = Some(v as u16); }
             }
             MESG_RECORD => {
                 let ts = match field_i64(record, 253) { Some(v) => v, None => continue };
@@ -123,34 +154,26 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
                     (Some(lat), Some(lon)) => Some(GpsPoint::from_semicircles(lat as i32, lon as i32)),
                     _ => None,
                 };
-                let hr      = field_u64(record, 3).map(|v| v as u8);
-                let stress  = field_u64(record, 135).map(|v| (v as u8).min(100));
-                let bb      = field_u64(record, 143).map(|v| v as u8);
-                let dist    = field_f32(record, 5).map(|v| v as f64);
-                let alt     = field_f32(record, 78).map(|v| v as f64); // enhanced_altitude
+                let hr     = field_u64(record, 3).map(|v| v as u8);
+                let stress = field_u64(record, 135).map(|v| (v as u8).min(100));
+                let bb     = field_u64(record, 143).map(|v| v as u8);
+                let dist   = field_f32(record, 5).map(|v| v as f64);
+                let alt    = field_f32(record, 78).map(|v| v as f64);
                 health.push(HealthSample { timestamp: ts, position: pos, heart_rate: hr,
                     stress_proxy: stress, body_battery: bb, distance_meters: dist,
                     altitude_meters: alt });
             }
             160 => {
-                // GpsMetadata: f3 = enhanced_altitude (Float64)
                 if let Some(alt) = field_f32(record, 3) {
                     alt_min = Some(alt_min.map_or(alt, |m: f32| m.min(alt)));
                     alt_max = Some(alt_max.map_or(alt, |m: f32| m.max(alt)));
                 }
             }
             MESG_SWING => {
-                // f2 = backswing (UInt8), f3 = downswing (SInt8)
-                // ratio = f2/f3, plausible range 1.5:1 to 6:1
-                if let (Some(back), Some(down)) = (
-                    field_any_f32(record, 2),
-                    field_any_f32(record, 3)
-                ) {
+                if let (Some(back), Some(down)) = (field_any_f32(record, 2), field_any_f32(record, 3)) {
                     if down > 0.0 && back > 0.0 {
                         let ratio = back / down;
-                        if ratio >= 1.5 && ratio <= 6.0 {
-                            tempo_samples.push(ratio);
-                        }
+                        if ratio >= 1.5 && ratio <= 6.0 { tempo_samples.push(ratio); }
                     }
                 }
             }
@@ -164,12 +187,8 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
         }
     }
 
-    // Average swing tempo
-    let avg_swing_tempo = if tempo_samples.is_empty() {
-        None
-    } else {
-        Some(tempo_samples.iter().sum::<f32>() / tempo_samples.len() as f32)
-    };
+    let avg_swing_tempo = if tempo_samples.is_empty() { None }
+        else { Some(tempo_samples.iter().sum::<f32>() / tempo_samples.len() as f32) };
 
     // Build health index for shot correlation
     let health_index: BTreeMap<i64, usize> = health.iter().enumerate()
@@ -182,9 +201,8 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
             (None, None) => None,
             (Some((_, &i)), None) => Some(&health[i]),
             (None, Some((_, &i))) => Some(&health[i]),
-            (Some((&ft, &fi)), Some((&ct, &ci))) => {
+            (Some((&ft, &fi)), Some((&ct, &ci))) =>
                 if ts - ft <= ct - ts { Some(&health[fi]) } else { Some(&health[ci]) }
-            }
         }
     };
 
@@ -209,23 +227,16 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
 
     Ok(GolfRound {
         id: String::new(),
-        start_ts,
-        end_ts,
-        duration_seconds: duration,
-        distance_meters: distance,
-        calories,
-        avg_heart_rate: avg_hr,
-        max_heart_rate: max_hr,
-        total_ascent: ascent,
-        total_descent: descent,
-        min_altitude_meters: alt_min,
-        max_altitude_meters: alt_max,
-        avg_swing_tempo,
-        shots,
-        health_timeline: health,
-        scorecard: None,
+        start_ts, end_ts, duration_seconds: duration, distance_meters: distance,
+        calories, avg_heart_rate: avg_hr, max_heart_rate: max_hr,
+        total_ascent: ascent, total_descent: descent,
+        min_altitude_meters: alt_min, max_altitude_meters: alt_max,
+        avg_swing_tempo, shots, health_timeline: health,
+        scorecard: None, clubs: Vec::new(),
     })
 }
+
+// ── Scorecard parser ─────────────────────────────────────────────────────────
 
 pub fn parse_scorecard(path: &Path) -> Result<Scorecard, String> {
     let mut file = std::fs::File::open(path)
@@ -309,8 +320,13 @@ pub fn parse_scorecard(path: &Path) -> Result<Scorecard, String> {
                     let from    = GpsPoint::from_semicircles(f2 as i32, f3 as i32);
                     let to      = GpsPoint::from_semicircles(f4 as i32, f5 as i32);
                     let club_id = field_u64(record, 7).unwrap_or(0);
-                    shots_by_hole.entry(hole).or_default()
-                        .push(ShotPosition { from, to, club_id });
+                    let dist    = Some(from.distance_meters_to(&to));
+                    shots_by_hole.entry(hole).or_default().push(ShotPosition {
+                        from, to, club_id,
+                        club_name: None, club_category: None,
+                        distance_meters: dist,
+                        heart_rate: None, altitude_meters: None, swing_tempo: None,
+                    });
                 }
             }
             _ => {}
@@ -331,4 +347,61 @@ pub fn parse_scorecard(path: &Path) -> Result<Scorecard, String> {
         player_name, front_score, back_score, total_score, total_putts, gir,
         fairways_hit, hole_definitions: hole_defs, hole_scores,
     })
+}
+
+/// Enrich scorecard shot positions with club info and health data from the activity.
+pub fn enrich_shots(scorecard: &mut Scorecard, clubs: &[ClubInfo], health: &[HealthSample]) {
+    let club_map: std::collections::HashMap<u64, &ClubInfo> =
+        clubs.iter().map(|c| (c.club_id, c)).collect();
+
+    eprintln!("[enrich] {} clubs in map, {} hole_scores",
+        club_map.len(), scorecard.hole_scores.len());
+
+    // Build health index by timestamp
+    let health_index: BTreeMap<i64, usize> = health.iter().enumerate()
+        .map(|(i, s)| (s.timestamp, i)).collect();
+
+    let nearest_health = |ts: i64| -> Option<&HealthSample> {
+        let floor = health_index.range(..=ts).next_back();
+        let ceil  = health_index.range(ts..).next();
+        match (floor, ceil) {
+            (None, None) => None,
+            (Some((_, &i)), None) => Some(&health[i]),
+            (None, Some((_, &i))) => Some(&health[i]),
+            (Some((&ft, &fi)), Some((&ct, &ci))) =>
+                if ts - ft <= ct - ts { Some(&health[fi]) } else { Some(&health[ci]) }
+        }
+    };
+
+    // We don't have per-shot timestamps in scorecard shots, so use GPS proximity
+    // to find the nearest health sample
+    for hs in &mut scorecard.hole_scores {
+        for shot in &mut hs.shots {
+            // Enrich with club info
+            if let Some(club) = club_map.get(&shot.club_id) {
+                shot.club_name     = Some(club.name.clone());
+                shot.club_category = Some(club.club_type.category().to_string());
+            } else {
+                eprintln!("[enrich] no club for id={} (0x{:08X})", shot.club_id, shot.club_id);
+            }
+            // Find nearest health sample by GPS proximity to shot.from
+            let mut best_ts: Option<i64> = None;
+            let mut best_dist = f64::MAX;
+            for s in health {
+                if let Some(pos) = &s.position {
+                    let d = pos.distance_meters_to(&shot.from);
+                    if d < best_dist {
+                        best_dist = d;
+                        best_ts = Some(s.timestamp);
+                    }
+                }
+            }
+            if let Some(ts) = best_ts {
+                if let Some(sample) = nearest_health(ts) {
+                    shot.heart_rate      = sample.heart_rate;
+                    shot.altitude_meters = sample.altitude_meters;
+                }
+            }
+        }
+    }
 }

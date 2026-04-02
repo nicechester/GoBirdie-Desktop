@@ -4,11 +4,8 @@
 #include <unistd.h>
 #include <libmtp.h>
 
-#define FOLDER_SCORCRDS  16777263
-#define FOLDER_ACTIVITY  16777249
-#define STORAGE_ID       0x00020001
-#define MIN_GOLF_SIZE    50000
-#define MAX_ROUNDS       100
+#define MIN_GOLF_SIZE 50000
+#define MAX_ROUNDS    100
 
 typedef struct {
     uint32_t id;
@@ -23,8 +20,46 @@ static int cmp_id_desc(const void *a, const void *b) {
     return (fb->id > fa->id) - (fb->id < fa->id);
 }
 
+// Walk the file tree recursively to find a folder named `target`
+// under a parent folder named `parent_name` (or any parent if parent_name is NULL).
+// Returns the folder_id or 0 if not found.
+static uint32_t find_folder_id(LIBMTP_mtpdevice_t *dev,
+                                LIBMTP_devicestorage_t *storage,
+                                uint32_t leaf,
+                                const char *parent_name,
+                                const char *target,
+                                int in_parent)
+{
+    LIBMTP_file_t *files = LIBMTP_Get_Files_And_Folders(dev, storage->id, leaf);
+    LIBMTP_file_t *f = files;
+    uint32_t found = 0;
+
+    while (f && !found) {
+        if (f->filetype == LIBMTP_FILETYPE_FOLDER) {
+            int now_in_parent = in_parent ||
+                (parent_name && strcmp(f->filename, parent_name) == 0);
+
+            if (now_in_parent && strcmp(f->filename, target) == 0) {
+                found = f->item_id;
+            } else {
+                found = find_folder_id(dev, storage, f->item_id,
+                                       parent_name, target, now_in_parent);
+            }
+        }
+        LIBMTP_file_t *next = f->next;
+        LIBMTP_destroy_file_t(f);
+        f = next;
+    }
+    // Free remaining nodes if we broke early
+    while (f) {
+        LIBMTP_file_t *next = f->next;
+        LIBMTP_destroy_file_t(f);
+        f = next;
+    }
+    return found;
+}
+
 int main(int argc, char *argv[]) {
-    // Args: dest_dir [count=1] [offset=0]
     const char *dest_dir = argc > 1 ? argv[1] : "/tmp";
     int count  = argc > 2 ? atoi(argv[2]) : 1;
     int offset = argc > 3 ? atoi(argv[3]) : 0;
@@ -43,15 +78,45 @@ int main(int argc, char *argv[]) {
     if (LIBMTP_Detect_Raw_Devices(&rawdevs, &numdevs) != 0 || numdevs == 0) {
         fprintf(stderr, "No MTP device found\n"); return 1;
     }
+
     LIBMTP_mtpdevice_t *dev = LIBMTP_Open_Raw_Device_Uncached(&rawdevs[0]);
     if (!dev) { fprintf(stderr, "Failed to open device\n"); return 1; }
 
-    // Collect all scorecard files, sort by ID descending
+    if (LIBMTP_Get_Storage(dev, LIBMTP_STORAGE_SORTBY_NOTSORTED) != 0) {
+        fprintf(stderr, "Failed to get storage\n");
+        LIBMTP_Release_Device(dev); return 1;
+    }
+    LIBMTP_devicestorage_t *storage = dev->storage;
+    if (!storage) {
+        fprintf(stderr, "No storage found\n");
+        LIBMTP_Release_Device(dev); return 1;
+    }
+
+    // Dynamically resolve folder IDs by walking the tree
+    uint32_t folder_scorcrds = find_folder_id(dev, storage,
+        LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "SCORCRDS", 0);
+    uint32_t folder_activity = find_folder_id(dev, storage,
+        LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "Activity", 0);
+    uint32_t folder_clubs    = find_folder_id(dev, storage,
+        LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "Clubs", 0);
+
+    // Fall back to env vars or hardcoded defaults
+    if (!folder_scorcrds) folder_scorcrds = getenv("GARMIN_FOLDER_SCORCRDS")
+        ? (uint32_t)atoi(getenv("GARMIN_FOLDER_SCORCRDS")) : 16777263;
+    if (!folder_activity) folder_activity = getenv("GARMIN_FOLDER_ACTIVITY")
+        ? (uint32_t)atoi(getenv("GARMIN_FOLDER_ACTIVITY")) : 16777249;
+    if (!folder_clubs)    folder_clubs    = getenv("GARMIN_FOLDER_CLUBS")
+        ? (uint32_t)atoi(getenv("GARMIN_FOLDER_CLUBS"))    : 16777264;
+
+    fprintf(stderr, "[folders] SCORCRDS=%u Activity=%u Clubs=%u\n",
+            folder_scorcrds, folder_activity, folder_clubs);
+
+    // Collect scorecard files
     FileEntry sc_files[MAX_ROUNDS * 2];
     int sc_count = 0;
-    LIBMTP_file_t *f = LIBMTP_Get_Files_And_Folders(dev, STORAGE_ID, FOLDER_SCORCRDS);
+    LIBMTP_file_t *f = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_scorcrds);
     while (f && sc_count < MAX_ROUNDS * 2) {
-        if (strcmp(f->filename, "Clubs.fit") != 0 && f->filesize > 0) {
+        if (f->filesize > 0) {
             sc_files[sc_count].id       = f->item_id;
             sc_files[sc_count].filesize = f->filesize;
             sc_files[sc_count].mtime    = f->modificationdate;
@@ -62,10 +127,27 @@ int main(int argc, char *argv[]) {
     }
     qsort(sc_files, sc_count, sizeof(FileEntry), cmp_id_desc);
 
-    // Collect all activity files indexed by mtime
+    // Download Clubs.fit
+    char clubs_dest[512] = "";
+    if (folder_clubs) {
+        LIBMTP_file_t *cf = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_clubs);
+        while (cf) {
+            if (strcmp(cf->filename, "Clubs.fit") == 0) {
+                snprintf(clubs_dest, sizeof(clubs_dest), "%s/Clubs.fit", dest_dir);
+                if (LIBMTP_Get_File_To_File(dev, cf->item_id, clubs_dest, NULL, NULL) != 0) {
+                    fprintf(stderr, "Failed to download Clubs.fit\n");
+                    clubs_dest[0] = '\0';
+                }
+                break;
+            }
+            cf = cf->next;
+        }
+    }
+
+    // Collect activity files
     FileEntry act_files[MAX_ROUNDS * 10];
     int act_count = 0;
-    LIBMTP_file_t *a = LIBMTP_Get_Files_And_Folders(dev, STORAGE_ID, FOLDER_ACTIVITY);
+    LIBMTP_file_t *a = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_activity);
     while (a && act_count < MAX_ROUNDS * 10) {
         if (a->filesize >= MIN_GOLF_SIZE) {
             act_files[act_count].id       = a->item_id;
@@ -77,15 +159,12 @@ int main(int argc, char *argv[]) {
         a = a->next;
     }
 
-    // Output JSON array
     printf("[\n");
-    int downloaded = 0;
-    int skipped    = 0;
+    int downloaded = 0, skipped = 0;
 
     for (int i = 0; i < sc_count && downloaded < count; i++) {
         FileEntry *sc = &sc_files[i];
 
-        // Find matching activity by mtime (within 60s)
         FileEntry *best_act = NULL;
         long best_diff = 999999;
         for (int j = 0; j < act_count; j++) {
@@ -93,21 +172,16 @@ int main(int argc, char *argv[]) {
             if (diff < best_diff) { best_diff = diff; best_act = &act_files[j]; }
         }
         if (!best_act || best_diff > 3600) continue;
-
-        // Apply offset
         if (skipped < offset) { skipped++; continue; }
 
-        // Build dest paths
         char sc_dest[512], act_dest[512];
-        snprintf(sc_dest,  sizeof(sc_dest),  "%s/%s",          dest_dir, sc->filename);
-        snprintf(act_dest, sizeof(act_dest), "%s/%s",          dest_dir, best_act->filename);
+        snprintf(sc_dest,  sizeof(sc_dest),  "%s/%s", dest_dir, sc->filename);
+        snprintf(act_dest, sizeof(act_dest), "%s/%s", dest_dir, best_act->filename);
 
-        // Download scorecard
         if (LIBMTP_Get_File_To_File(dev, sc->id, sc_dest, NULL, NULL) != 0) {
             fprintf(stderr, "Failed to download scorecard %s\n", sc->filename);
             continue;
         }
-        // Download activity
         if (LIBMTP_Get_File_To_File(dev, best_act->id, act_dest, NULL, NULL) != 0) {
             fprintf(stderr, "Failed to download activity %s\n", best_act->filename);
             continue;
@@ -121,7 +195,8 @@ int main(int argc, char *argv[]) {
         printf("    \"activity\": \"%s\",\n",        act_dest);
         printf("    \"activity_name\": \"%s\",\n",  best_act->filename);
         printf("    \"activity_mtime\": %ld,\n",    (long)best_act->mtime);
-        printf("    \"activity_size\": %llu\n",     (unsigned long long)best_act->filesize);
+        printf("    \"activity_size\": %llu,\n",    (unsigned long long)best_act->filesize);
+        printf("    \"clubs_path\": \"%s\"\n",       clubs_dest);
         printf("  }");
 
         downloaded++;

@@ -12,6 +12,7 @@ pub struct MtpEntry {
     pub activity_name: String,
     pub activity_mtime: i64,
     pub activity_size: u64,
+    pub clubs_path: String,
 }
 
 /// Kill Android File Transfer and download up to `count` rounds starting at `offset`.

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 pub const GARMIN_EPOCH_OFFSET: i64 = 631065600;
 
+// ── GPS ──────────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpsPoint {
     pub lat: f64,
@@ -27,6 +29,110 @@ impl GpsPoint {
     }
 }
 
+// ── Club ─────────────────────────────────────────────────────────────────────
+
+/// Garmin club type enum (f2 in mesg #173)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClubType {
+    Driver,
+    Wood3,
+    Wood5,
+    Wood7,
+    Hybrid,
+    Iron2, Iron3, Iron4, Iron5, Iron6, Iron7, Iron8, Iron9,
+    PitchingWedge,
+    GapWedge,
+    SandWedge,
+    LobWedge,
+    Putter,
+    Unknown(u8),
+}
+
+impl ClubType {
+    pub fn from_enum(v: u8) -> Self {
+        match v {
+            1  => ClubType::Driver,
+            2  => ClubType::Wood3,
+            3  => ClubType::Wood5,
+            4  => ClubType::Wood7,
+            5  | 6 => ClubType::Hybrid,
+            7  => ClubType::Iron2,
+            8  => ClubType::Iron3,
+            9  => ClubType::Iron4,
+            10 => ClubType::Iron5,
+            11 => ClubType::Iron6,
+            12 => ClubType::Iron7,  // not in data but standard
+            13 => ClubType::Iron8,
+            14 => ClubType::Iron5,  // re-check: f2=14 in data
+            15 => ClubType::Iron6,
+            16 => ClubType::Iron7,
+            17 => ClubType::Iron8,
+            18 => ClubType::Iron9,
+            19 => ClubType::PitchingWedge,
+            20 => ClubType::GapWedge,
+            21 => ClubType::SandWedge,
+            22 => ClubType::LobWedge,
+            23 => ClubType::Putter,
+            n  => ClubType::Unknown(n),
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            ClubType::Driver        => "Driver",
+            ClubType::Wood3         => "3-Wood",
+            ClubType::Wood5         => "5-Wood",
+            ClubType::Wood7         => "7-Wood",
+            ClubType::Hybrid        => "Hybrid",
+            ClubType::Iron2         => "2-Iron",
+            ClubType::Iron3         => "3-Iron",
+            ClubType::Iron4         => "4-Iron",
+            ClubType::Iron5         => "5-Iron",
+            ClubType::Iron6         => "6-Iron",
+            ClubType::Iron7         => "7-Iron",
+            ClubType::Iron8         => "8-Iron",
+            ClubType::Iron9         => "9-Iron",
+            ClubType::PitchingWedge => "PW",
+            ClubType::GapWedge      => "GW",
+            ClubType::SandWedge     => "SW",
+            ClubType::LobWedge      => "LW",
+            ClubType::Putter        => "Putter",
+            ClubType::Unknown(_)    => "Unknown",
+        }
+    }
+
+    pub fn category(&self) -> &'static str {
+        match self {
+            ClubType::Driver => "tee",
+            ClubType::Wood3 | ClubType::Wood5 | ClubType::Wood7 | ClubType::Hybrid => "fairway_wood",
+            ClubType::Iron2 | ClubType::Iron3 | ClubType::Iron4
+            | ClubType::Iron5 | ClubType::Iron6 | ClubType::Iron7
+            | ClubType::Iron8 | ClubType::Iron9 => "iron",
+            ClubType::PitchingWedge | ClubType::GapWedge
+            | ClubType::SandWedge   | ClubType::LobWedge => "wedge",
+            ClubType::Putter => "putt",
+            ClubType::Unknown(_) => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClubInfo {
+    pub club_id: u64,
+    pub club_type: ClubType,
+    pub name: String,           // custom name or default
+    pub avg_distance_cm: u32,   // f6
+}
+
+impl ClubInfo {
+    #[allow(dead_code)]
+    pub fn avg_distance_yards(&self) -> f64 { self.avg_distance_cm as f64 / 91.44 }
+    #[allow(dead_code)]
+    pub fn avg_distance_meters(&self) -> f64 { self.avg_distance_cm as f64 / 100.0 }
+}
+
+// ── Health ───────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthSample {
     pub timestamp: i64,
@@ -37,6 +143,8 @@ pub struct HealthSample {
     pub distance_meters: Option<f64>,
     pub altitude_meters: Option<f64>,
 }
+
+// ── Shots ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GolfShot {
@@ -54,7 +162,17 @@ pub struct ShotPosition {
     pub from: GpsPoint,
     pub to: GpsPoint,
     pub club_id: u64,
+    // Enriched after club lookup
+    pub club_name: Option<String>,
+    pub club_category: Option<String>,
+    pub distance_meters: Option<f64>,   // computed from GPS
+    // Enriched from activity health timeline
+    pub heart_rate: Option<u8>,
+    pub altitude_meters: Option<f64>,
+    pub swing_tempo: Option<f32>,
 }
+
+// ── Scorecard ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HoleScore {
@@ -114,6 +232,8 @@ impl Scorecard {
     }
 }
 
+// ── Round ────────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GolfRound {
     pub id: String,
@@ -126,13 +246,13 @@ pub struct GolfRound {
     pub max_heart_rate: Option<u8>,
     pub total_ascent: Option<u16>,
     pub total_descent: Option<u16>,
-    // New fields
     pub min_altitude_meters: Option<f32>,
     pub max_altitude_meters: Option<f32>,
-    pub avg_swing_tempo: Option<f32>,   // backswing/downswing ratio (e.g. 3.0)
+    pub avg_swing_tempo: Option<f32>,
     pub shots: Vec<GolfShot>,
     pub health_timeline: Vec<HealthSample>,
     pub scorecard: Option<Scorecard>,
+    pub clubs: Vec<ClubInfo>,           // from Clubs.fit
 }
 
 impl GolfRound {
@@ -141,6 +261,8 @@ impl GolfRound {
             .unwrap_or_default()
     }
 }
+
+// ── Summary ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoundSummary {
@@ -159,7 +281,6 @@ pub struct RoundSummary {
     pub total_putts: u8,
     pub gir: u8,
     pub fairways_hit: u8,
-    // New fields
     pub min_altitude_meters: Option<f32>,
     pub max_altitude_meters: Option<f32>,
     pub avg_swing_tempo: Option<f32>,

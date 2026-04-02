@@ -8,6 +8,23 @@
 .round-item:hover { background: #f3f4f6; }
 .round-item.active { background: #eff6ff; border-left: 3px solid #2563eb; }
 
+/* Detail tabs */
+.detail-tab {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.detail-tab:hover { color: #2563eb; }
+.detail-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+/* Map */
+#shot-map { height: calc(100vh - 320px); min-height: 300px; border-radius: 0.5rem; z-index: 0; }
+
 /* Score badge */
 .score-badge {
     display: inline-flex;

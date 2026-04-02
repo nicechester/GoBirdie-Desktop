@@ -5,9 +5,11 @@ const PAGE_SIZE = 10;
 const state = {
     rounds: [],
     activeId: null,
+    activeTab: 'overview',  // 'overview' | 'shotmap' | 'stats'
     searchTerm: '',
     syncOffset: 0,
     syncing: false,
+    activeRound: null,      // full GolfRound for current detail
 };
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -126,38 +128,95 @@ function renderRoundsList() {
 // ── Round detail ─────────────────────────────────────────────────────────────
 
 async function loadDetail(id) {
-    state.activeId = id;
+    // If same round, just switch tab rendering — no re-fetch
+    if (state.activeRound?.id === id) {
+        renderDetailTabs();
+        return;
+    }
+
+    state.activeId    = id;
+    state.activeTab   = 'overview';
+    state.activeRound = null;
     renderRoundsList();
 
     const content = document.getElementById('detail-content');
     const empty   = document.getElementById('detail-empty');
-    content.innerHTML = '<div class="text-center text-gray-400 py-12">Loading...</div>';
     content.classList.remove('hidden');
     empty.classList.add('hidden');
+
+    // Show tab bar immediately with a loading placeholder in the content area
+    content.innerHTML = `
+        <div class="flex border-b bg-white sticky top-0 z-10 pt-4 mb-4">
+            <button class="detail-tab active" data-tab="overview">Overview</button>
+            <button class="detail-tab" data-tab="shotmap">Shot Map</button>
+            <button class="detail-tab" data-tab="stats">Course Stats</button>
+        </div>
+        <div class="text-center text-gray-400 py-12">Loading...</div>`;
 
     try {
         const round = await getRoundDetail(id);
         if (!round) { content.innerHTML = '<p class="text-red-500">Round not found.</p>'; return; }
-        content.innerHTML = buildDetailHTML(round);
-        // Render chart after DOM is updated
-        requestAnimationFrame(() => renderTimelineChart(round));
+        state.activeRound = round;
+        renderDetailTabs();
     } catch (e) {
         content.innerHTML = `<p class="text-red-500">Error: ${e}</p>`;
     }
 }
 
-function buildDetailHTML(round) {
+function renderDetailTabs() {
+    const round   = state.activeRound;
+    const content = document.getElementById('detail-content');
+    if (!round) return;
+
     const sc = round.scorecard;
     const dt = new Date((round.start_ts + 631065600) * 1000);
     const dateStr = dt.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
     const timeStr = dt.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
-    return `
-        ${buildHeader(round, sc, dateStr, timeStr)}
-        ${buildTimeline(round)}
-        ${sc ? buildScorecard(sc) : ''}
-        ${buildHealth(round)}
-        ${buildHrZones(round)}
-    `;
+
+    const tabs = [
+        { id: 'overview', label: 'Overview' },
+        { id: 'shotmap',  label: 'Shot Map' },
+        { id: 'stats',    label: 'Course Stats' },
+    ];
+
+    const tabBar = `
+    <div class="flex border-b bg-white sticky top-0 z-10 pt-4 mb-4">
+        ${tabs.map(t => `
+        <button class="detail-tab ${state.activeTab === t.id ? 'active' : ''}" data-tab="${t.id}">
+            ${t.label}
+        </button>`).join('')}
+    </div>`;
+
+    let tabContent = '';
+    if (state.activeTab === 'overview') {
+        tabContent = `
+            ${buildHeader(round, sc, dateStr, timeStr)}
+            ${sc ? buildScorecard(sc) : ''}
+            ${buildHealth(round)}
+            ${buildHrZones(round)}`;
+    } else if (state.activeTab === 'shotmap') {
+        tabContent = buildShotMap(round);
+    } else if (state.activeTab === 'stats') {
+        tabContent = buildCourseStats(round);
+    }
+
+    content.innerHTML = tabBar + `<div class="space-y-6 pb-6">${tabContent}</div>`;
+
+    // Wire tab buttons — no re-fetch, just re-render
+    content.querySelectorAll('.detail-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (state.activeTab === btn.dataset.tab) return;
+            state.activeTab = btn.dataset.tab;
+            renderDetailTabs();
+        });
+    });
+
+    // Post-render hooks
+    if (state.activeTab === 'overview') {
+        // no chart in overview anymore
+    } else if (state.activeTab === 'shotmap') {
+        requestAnimationFrame(() => renderShotMap(round));
+    }
 }
 
 function buildHeader(round, sc, dateStr, timeStr) {
@@ -216,6 +275,9 @@ function buildHeader(round, sc, dateStr, timeStr) {
 // ── Timeline chart ───────────────────────────────────────────────────────────
 
 let activeChart = null;
+let activeHoleMarkers = []; // shared between renderTimelineChart and zoomTimeline
+let activeTimelinePts = []; // health samples used in chart (downsampled)
+const GARMIN_EPOCH = 631065600;
 
 function buildTimeline(round) {
     return `
@@ -248,9 +310,8 @@ function renderTimelineChart(round) {
     const altData    = pts.map(s => s.altitude_meters != null ? +s.altitude_meters.toFixed(1) : null);
     const stressData = pts.map(s => s.stress_proxy ?? null);
 
-    // Build hole markers: find the label index closest to each hole's first shot timestamp
-    // Enforce monotonically increasing order so H18 can't match an early shot
-    const holeMarkers = []; // { index, label }
+    // Build hole markers and store in shared variable
+    activeHoleMarkers = [];
     const sc = round.scorecard;
     if (sc?.hole_scores?.length > 0 && round.shots?.length > 0) {
         const sortedHoles = [...sc.hole_scores].sort((a, b) => a.hole_number - b.hole_number);
@@ -277,7 +338,7 @@ function renderTimelineChart(round) {
                 const diff = Math.abs((s.timestamp + GARMIN_EPOCH) - shotUnix);
                 if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
             });
-            holeMarkers.push({ index: closestIdx, label: `H${hs.hole_number}` });
+            activeHoleMarkers.push({ index: closestIdx, label: `H${hs.hole_number}` });
         });
     }
 
@@ -286,7 +347,7 @@ function renderTimelineChart(round) {
         id: 'holeLines',
         afterDraw(chart) {
             const { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
-            holeMarkers.forEach(({ index, label }) => {
+            activeHoleMarkers.forEach(({ index, label }) => {
                 const xPos = x.getPixelForValue(index);
                 if (xPos < x.left || xPos > x.right) return;
                 ctx.save();
@@ -380,6 +441,33 @@ function renderTimelineChart(round) {
             }
         }
     });
+}
+
+// Zoom the timeline chart to a hole's time window, or reset to full round.
+function zoomTimeline(holeFilter) {
+    if (!activeChart) return;
+    const xScale = activeChart.options.scales.x;
+
+    if (holeFilter === 'all') {
+        xScale.min = undefined;
+        xScale.max = undefined;
+        activeChart.update();
+        return;
+    }
+
+    const holeNum = parseInt(holeFilter);
+    const idx = activeHoleMarkers.findIndex(m => m.label === `H${holeNum}`);
+    if (idx === -1) return;
+
+    const startIdx = activeHoleMarkers[idx].index;
+    const endIdx = idx + 1 < activeHoleMarkers.length
+        ? activeHoleMarkers[idx + 1].index
+        : activeChart.data.labels.length - 1;
+
+    const buffer = Math.max(2, Math.round((endIdx - startIdx) * 0.1));
+    xScale.min = Math.max(0, startIdx - buffer);
+    xScale.max = Math.min(activeChart.data.labels.length - 1, endIdx + buffer);
+    activeChart.update();
 }
 
 function buildScorecard(sc) {
@@ -509,6 +597,468 @@ function buildHrZones(round) {
             </div>`;
         }).join('')}
         </div>
+    </div>`;
+}
+
+// ── Shot Map ─────────────────────────────────────────────────────────────────
+
+let activeMap = null;
+
+function buildShotMap(round) {
+    const sc = round.scorecard;
+    const holes = sc?.hole_scores ?? [];
+
+    // Hole selector buttons
+    const holeButtons = holes.map(hs => `
+        <button class="hole-btn px-3 py-1 text-xs rounded-full border border-gray-300
+            hover:bg-blue-50 hover:border-blue-400 transition" data-hole="${hs.hole_number}">
+            H${hs.hole_number}
+        </button>`).join('');
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-lg font-semibold text-gray-700">Shot Map</h3>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-400">Hole:</span>
+                <button class="hole-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border border-blue-600"
+                    data-hole="all">All</button>
+                ${holeButtons}
+            </div>
+        </div>
+        <div id="shot-map"></div>
+        <div id="shot-legend" class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500"></div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">Round Timeline</h3>
+        <p class="text-xs text-gray-400 mb-4">Select a hole above to zoom in. HR, altitude and stress over time.</p>
+        <div class="relative" style="height:240px">
+            <canvas id="timeline-chart"></canvas>
+        </div>
+    </div>`;
+}
+
+const CLUB_COLORS = {
+    tee:          '#ef4444',  // red
+    fairway_wood: '#f97316',  // orange
+    iron:         '#3b82f6',  // blue
+    wedge:        '#8b5cf6',  // purple
+    putt:         '#10b981',  // green
+    unknown:      '#9ca3af',  // gray
+};
+
+function renderShotMap(round) {
+    const mapEl = document.getElementById('shot-map');
+    if (!mapEl) return;
+
+    // Destroy previous map instance
+    if (activeMap) { activeMap.remove(); activeMap = null; }
+
+    const sc = round.scorecard;
+    if (!sc?.hole_scores?.length) {
+        mapEl.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">No shot data available.</p>';
+        return;
+    }
+
+    // Collect all shot positions to compute map bounds
+    const allShots = sc.hole_scores.flatMap(hs =>
+        hs.shots.map(s => ({ ...s, hole_number: hs.hole_number, score: hs.score }))
+    );
+    if (!allShots.length) return;
+
+    const lats = allShots.flatMap(s => [s.from.lat, s.to.lat]);
+    const lons = allShots.flatMap(s => [s.from.lon, s.to.lon]);
+    const bounds = [
+        [Math.min(...lats), Math.min(...lons)],
+        [Math.max(...lats), Math.max(...lons)],
+    ];
+
+    // Init Leaflet map
+    activeMap = L.map('shot-map').fitBounds(bounds, { padding: [30, 30] });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19,
+    }).addTo(activeMap);
+
+    // Layer groups per hole for filtering
+    const holeLayers = {};
+    sc.hole_scores.forEach(hs => { holeLayers[hs.hole_number] = L.layerGroup().addTo(activeMap); });
+
+    // Draw shots
+    allShots.forEach((shot, idx) => {
+        const layer = holeLayers[shot.hole_number];
+        if (!layer) return;
+
+        const cat   = shot.club_category ?? 'unknown';
+        const color = CLUB_COLORS[cat] ?? CLUB_COLORS.unknown;
+        const club  = shot.club_name ?? cat;
+        const dist  = shot.distance_meters ? `${Math.round(shot.distance_meters)}m` : '';
+        const hr    = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
+        const alt   = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
+
+        // Arrow line from → to
+        const line = L.polyline(
+            [[shot.from.lat, shot.from.lon], [shot.to.lat, shot.to.lon]],
+            { color, weight: 2.5, opacity: 0.85 }
+        ).addTo(layer);
+
+        // Circle at shot origin
+        const shotNum = idx + 1;
+        const circle = L.circleMarker([shot.from.lat, shot.from.lon], {
+            radius: 6, color: 'white', weight: 1.5,
+            fillColor: color, fillOpacity: 1,
+        }).addTo(layer);
+
+        const popupLines = [
+            `<b>H${shot.hole_number} Shot ${shotNum}</b>`,
+            `Club: ${club}`,
+            dist  ? `Distance: ${dist}` : null,
+            hr    ? `HR: ${hr}` : null,
+            alt   ? `Alt: ${alt}` : null,
+        ].filter(Boolean).join('<br>');
+
+        circle.bindPopup(popupLines);
+        line.bindPopup(popupLines);
+
+        // On click, highlight this shot's time on the timeline
+        const shotTs = shot.heart_rate != null ? shot : null;
+        circle.on('click', () => highlightShotOnTimeline(shot, pts, GARMIN_EPOCH));
+        line.on('click',   () => highlightShotOnTimeline(shot, pts, GARMIN_EPOCH));
+
+        // Arrowhead at destination
+        L.circleMarker([shot.to.lat, shot.to.lon], {
+            radius: 3, color, weight: 0,
+            fillColor: color, fillOpacity: 0.6,
+        }).addTo(layer);
+    });
+
+    // Hole number labels at tee positions
+    sc.hole_definitions.forEach(hd => {
+        if (!hd.tee_position) return;
+        L.marker([hd.tee_position.lat, hd.tee_position.lon], {
+            icon: L.divIcon({
+                className: '',
+                html: `<div style="background:#1e40af;color:white;border-radius:50%;
+                    width:20px;height:20px;display:flex;align-items:center;
+                    justify-content:center;font-size:10px;font-weight:700;
+                    border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4)">
+                    ${hd.hole_number}</div>`,
+                iconSize: [20, 20], iconAnchor: [10, 10],
+            })
+        }).addTo(activeMap);
+    });
+
+    // Legend
+    const usedCats = [...new Set(allShots.map(s => s.club_category ?? 'unknown'))];
+    const catLabels = { tee:'Driver/Tee', fairway_wood:'Fairway Wood', iron:'Iron',
+                        wedge:'Wedge', putt:'Putter', unknown:'Unknown' };
+    document.getElementById('shot-legend').innerHTML = usedCats.map(cat => `
+        <span class="flex items-center gap-1">
+            <span style="background:${CLUB_COLORS[cat]};width:12px;height:12px;
+                border-radius:50%;display:inline-block"></span>
+            ${catLabels[cat] ?? cat}
+        </span>`).join('');
+
+    // Hole filter buttons
+    document.querySelectorAll('.hole-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Update active button style
+            document.querySelectorAll('.hole-btn').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                b.classList.add('border-gray-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('border-gray-300');
+
+            const holeFilter = btn.dataset.hole;
+
+            // Show/hide layers
+            Object.entries(holeLayers).forEach(([holeNum, layer]) => {
+                if (holeFilter === 'all' || holeNum === holeFilter) {
+                    activeMap.addLayer(layer);
+                } else {
+                    activeMap.removeLayer(layer);
+                }
+            });
+
+            // Zoom map to selected hole or all
+            if (holeFilter === 'all') {
+                activeMap.fitBounds(bounds, { padding: [30, 30] });
+            } else {
+                const holeShots = allShots.filter(s => String(s.hole_number) === holeFilter);
+                if (holeShots.length) {
+                    const hlats = holeShots.flatMap(s => [s.from.lat, s.to.lat]);
+                    const hlons = holeShots.flatMap(s => [s.from.lon, s.to.lon]);
+                    activeMap.fitBounds([
+                        [Math.min(...hlats), Math.min(...hlons)],
+                        [Math.max(...hlats), Math.max(...hlons)],
+                    ], { padding: [50, 50], maxZoom: 18 });
+                }
+            }
+
+            // Zoom timeline chart to hole time window
+            zoomTimeline(holeFilter);
+        });
+    });
+
+    // Render timeline chart below the map
+    requestAnimationFrame(() => renderTimelineChart(round));
+}
+
+// ── Course Stats ─────────────────────────────────────────────────────────────
+
+function bearing(from, to) {
+    const lat1 = from.lat * Math.PI / 180;
+    const lat2 = to.lat   * Math.PI / 180;
+    const dLon = (to.lon - from.lon) * Math.PI / 180;
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function distMeters(from, to) {
+    const R = 6371000;
+    const dLat = (to.lat - from.lat) * Math.PI / 180;
+    const dLon = (to.lon - from.lon) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(from.lat*Math.PI/180) * Math.cos(to.lat*Math.PI/180) * Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function metersToYards(m) { return m * 1.09361; }
+
+// Bearing deviation: positive = right of target, negative = left
+function deviation(shotBearing, holeBearing) {
+    let d = shotBearing - holeBearing;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    return d;
+}
+
+function dirLabel(dev) {
+    if (Math.abs(dev) < 10) return 'Straight';
+    if (dev > 0) return dev > 30 ? 'Far Right' : 'Right';
+    return dev < -30 ? 'Far Left' : 'Left';
+}
+
+function buildCourseStats(round) {
+    const sc = round.scorecard;
+    if (!sc?.hole_scores?.length) {
+        return `<div class="bg-white rounded-xl shadow-sm border p-6">
+            <p class="text-gray-400 text-sm">No scorecard data available.</p></div>`;
+    }
+
+    // Build enriched shot list with distance, bearing, deviation from hole direction
+    const enriched = [];
+    sc.hole_scores.forEach(hs => {
+        const holeDef = sc.hole_definitions.find(h => h.hole_number === hs.hole_number);
+        const shots = hs.shots;
+        if (!shots.length) return;
+
+        // Hole direction = bearing from first shot to last shot destination
+        const firstFrom = shots[0].from;
+        const lastTo    = shots[shots.length - 1].to;
+        const holeBearing = bearing(firstFrom, lastTo);
+
+        shots.forEach((shot, idx) => {
+            const dist = distMeters(shot.from, shot.to);
+            const bear = bearing(shot.from, shot.to);
+            const dev  = deviation(bear, holeBearing);
+            enriched.push({
+                hole:     hs.hole_number,
+                par:      holeDef?.par ?? 0,
+                shotIdx:  idx,
+                shotNum:  idx + 1,
+                totalShots: shots.length,
+                club:     shot.club_name ?? 'Unknown',
+                cat:      shot.club_category ?? 'unknown',
+                dist,
+                distYds:  metersToYards(dist),
+                bearing:  bear,
+                deviation: dev,
+                dirLabel: dirLabel(dev),
+                hr:       shot.heart_rate,
+                alt:      shot.altitude_meters,
+            });
+        });
+    });
+
+    const teeShots     = enriched.filter(s => s.cat === 'tee');
+    const approachShots = enriched.filter(s => s.cat === 'fairway_wood' || s.cat === 'iron');
+    const wedgeShots   = enriched.filter(s => s.cat === 'wedge');
+    const putts        = enriched.filter(s => s.cat === 'putt');
+
+    return `
+    <div class="space-y-6">
+        ${buildStatSection('Tee Shots', teeShots, true)}
+        ${buildStatSection('Approach Shots', approachShots, false)}
+        ${buildStatSection('Wedges', wedgeShots, false)}
+        ${buildPuttSection(putts, sc)}
+        ${buildClubSummary(enriched)}
+    </div>`;
+}
+
+function buildStatSection(title, shots, isTee) {
+    if (!shots.length) return '';
+
+    const avgDist = shots.reduce((a, s) => a + s.distYds, 0) / shots.length;
+    const maxDist = Math.max(...shots.map(s => s.distYds));
+    const straight = shots.filter(s => Math.abs(s.deviation) < 15).length;
+    const right    = shots.filter(s => s.deviation >= 15).length;
+    const left     = shots.filter(s => s.deviation <= -15).length;
+
+    const dirBar = (count, total, color, label) => {
+        if (!count) return '';
+        const pct = (count / total * 100).toFixed(0);
+        return `<div class="flex items-center gap-2 text-xs">
+            <div class="w-12 text-right text-gray-500">${label}</div>
+            <div class="flex-1 bg-gray-100 rounded-full h-3">
+                <div class="${color} h-3 rounded-full" style="width:${pct}%"></div>
+            </div>
+            <div class="w-12 text-gray-600">${count} (${pct}%)</div>
+        </div>`;
+    };
+
+    const rows = shots.map(s => `
+        <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-1.5 text-xs text-gray-500">H${s.hole} S${s.shotNum}</td>
+            <td class="py-1.5 text-xs">${s.club}</td>
+            <td class="py-1.5 text-xs font-medium">${Math.round(s.distYds)} yds</td>
+            <td class="py-1.5 text-xs">
+                <span class="${
+                    Math.abs(s.deviation) < 15 ? 'text-green-600' :
+                    Math.abs(s.deviation) < 30 ? 'text-yellow-600' : 'text-red-600'
+                }">${s.dirLabel}</span>
+                <span class="text-gray-400 ml-1">(${s.deviation > 0 ? '+' : ''}${Math.round(s.deviation)}°)</span>
+            </td>
+            ${s.hr ? `<td class="py-1.5 text-xs text-gray-400">${s.hr} bpm</td>` : '<td></td>'}
+        </tr>`).join('');
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${title}
+            <span class="text-sm font-normal text-gray-400 ml-2">${shots.length} shots</span>
+        </h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-gray-800">${Math.round(avgDist)}</div>
+                <div class="text-xs text-gray-500">Avg (yds)</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-gray-800">${Math.round(maxDist)}</div>
+                <div class="text-xs text-gray-500">Max (yds)</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-600">${Math.round(straight / shots.length * 100)}%</div>
+                <div class="text-xs text-gray-500">Straight</div>
+            </div>
+        </div>
+        <div class="space-y-1.5 mb-4">
+            ${dirBar(left,     shots.length, 'bg-blue-400',   'Left')}
+            ${dirBar(straight, shots.length, 'bg-green-400',  'Straight')}
+            ${dirBar(right,    shots.length, 'bg-orange-400', 'Right')}
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-xs text-gray-400 border-b">
+                    <th class="text-left py-1">Shot</th>
+                    <th class="text-left py-1">Club</th>
+                    <th class="text-left py-1">Dist</th>
+                    <th class="text-left py-1">Direction</th>
+                    <th class="text-left py-1">HR</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function buildPuttSection(putts, sc) {
+    if (!putts.length) return '';
+
+    const totalPutts = sc.hole_scores.reduce((a, h) => a + h.putts, 0);
+    const holesPlayed = sc.hole_scores.length;
+    const onePutts = sc.hole_scores.filter(h => h.putts === 1).length;
+    const threePutts = sc.hole_scores.filter(h => h.putts >= 3).length;
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">Putting
+            <span class="text-sm font-normal text-gray-400 ml-2">${totalPutts} total</span>
+        </h3>
+        <div class="grid grid-cols-4 gap-4 text-center">
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-gray-800">${(totalPutts / holesPlayed).toFixed(1)}</div>
+                <div class="text-xs text-gray-500">Per hole</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-600">${onePutts}</div>
+                <div class="text-xs text-gray-500">1-putts</div>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-blue-600">${totalPutts - onePutts - threePutts}</div>
+                <div class="text-xs text-gray-500">2-putts</div>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-red-600">${threePutts}</div>
+                <div class="text-xs text-gray-500">3-putts</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function buildClubSummary(enriched) {
+    // Group by club name, compute avg/max distance
+    const byClub = {};
+    enriched.filter(s => s.cat !== 'putt' && s.distYds > 5).forEach(s => {
+        if (!byClub[s.club]) byClub[s.club] = [];
+        byClub[s.club].push(s);
+    });
+
+    const catOrder = ['tee', 'fairway_wood', 'iron', 'wedge', 'unknown'];
+    const clubs = Object.entries(byClub)
+        .map(([name, shots]) => ({
+            name,
+            cat: shots[0].cat,
+            count: shots.length,
+            avg: shots.reduce((a, s) => a + s.distYds, 0) / shots.length,
+            max: Math.max(...shots.map(s => s.distYds)),
+            straight: shots.filter(s => Math.abs(s.deviation) < 15).length,
+        }))
+        .sort((a, b) => catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat) || b.avg - a.avg);
+
+    const maxAvg = Math.max(...clubs.map(c => c.avg));
+
+    const rows = clubs.map(c => `
+        <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-2 text-sm font-medium">${c.name}</td>
+            <td class="py-2 text-xs text-gray-400">${c.count}</td>
+            <td class="py-2">
+                <div class="flex items-center gap-2">
+                    <div class="w-24 bg-gray-100 rounded-full h-2">
+                        <div class="bg-blue-500 h-2 rounded-full" style="width:${(c.avg/maxAvg*100).toFixed(0)}%"></div>
+                    </div>
+                    <span class="text-sm font-medium">${Math.round(c.avg)} yds</span>
+                </div>
+            </td>
+            <td class="py-2 text-xs text-gray-400">${Math.round(c.max)} yds</td>
+            <td class="py-2 text-xs ${c.straight/c.count > 0.6 ? 'text-green-600' : 'text-gray-400'}">
+                ${Math.round(c.straight/c.count*100)}%
+            </td>
+        </tr>`).join('');
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">Club Summary</h3>
+        <table class="w-full text-sm">
+            <thead><tr class="text-xs text-gray-400 border-b">
+                <th class="text-left py-1">Club</th>
+                <th class="text-left py-1">Shots</th>
+                <th class="text-left py-1">Avg Distance</th>
+                <th class="text-left py-1">Max</th>
+                <th class="text-left py-1">Straight%</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
     </div>`;
 }
 
