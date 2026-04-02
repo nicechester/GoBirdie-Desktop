@@ -96,6 +96,7 @@ All commands are invoked from the frontend via `invoke()` from `@tauri-apps/api/
 | `import_fit_files(scorecard_paths, activity_paths)` | Bulk import from explicit file paths. Scorecard files are matched to activity files by tee timestamp within a 12-hour window |
 | `get_all_rounds` | Returns all stored `RoundSummary` objects sorted newest first |
 | `get_round_detail(id)` | Returns the full `GolfRound` for a given ID, including scorecard and health timeline |
+| `get_clubs` | Returns all `ClubInfo` entries loaded from `Clubs.fit` |
 | `get_store_stats` | Returns `{ round_count }` |
 
 ## Data Model
@@ -124,6 +125,29 @@ Parsed from proprietary Garmin messages in the SCORCRDS FIT file.
 | #193 | Hole definitions: par, handicap, distance, tee GPS position |
 | #194 | Shot positions: from/to GPS coordinates, club ID |
 
+### ClubInfo
+
+Parsed from `Clubs.fit` (mesg #173) in the `GARMIN/Clubs/` folder on the watch.
+
+| Field | Description |
+|-------|-------------|
+| `club_id` | Opaque `u64` identifier — matches `club_id` on `ShotPosition` |
+| `club_type` | `ClubType` enum (Driver, 3-Wood, 5-Iron, PW, SW, Putter, etc.) |
+| `name` | Display name derived from `ClubType` (e.g. `"7-Iron"`, `"SW"`) |
+| `avg_distance_cm` | Average carry distance in centimetres as recorded by the watch |
+
+`ClubType` maps Garmin's internal enum values (field `f2` in mesg #173) to named variants. `category()` returns a grouping string used by the Course Stats tab:
+
+| Category | Club types |
+|----------|------------|
+| `tee` | Driver |
+| `fairway_wood` | 3/5/7-Wood, Hybrid |
+| `iron` | 2–9 Iron |
+| `wedge` | PW, GW, SW, LW |
+| `putt` | Putter |
+
+Clubs are loaded once at startup from the path returned by `garmin_mtp` in the `clubs_path` JSON field. They are stored in `AppState.clubs` and passed to `enrich_shots()` after parsing each round.
+
 ### HealthSample
 
 One sample per Record message from the activity FIT file.
@@ -151,8 +175,9 @@ The `garmin_mtp` binary uses libmtp to:
 1. Detect the Garmin watch via USB
 2. List files in `GARMIN/SCORCRDS/` — find the highest file ID (most recent scorecard)
 3. List files in `GARMIN/Activity/` — find the activity whose `modificationdate` matches the scorecard
-4. Download both files to a temp directory
-5. Output a JSON object with file paths and metadata to stdout
+4. Download `Clubs.fit` from `GARMIN/Clubs/` — club definitions (name, type, avg distance)
+5. Download both scorecard and activity files to a temp directory
+6. Output a JSON object with file paths and metadata to stdout, including `clubs_path`
 
 Android File Transfer must not be running when syncing. The app kills it automatically before invoking the binary.
 
