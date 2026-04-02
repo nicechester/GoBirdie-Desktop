@@ -11,6 +11,10 @@ Garmin watches store golf activity data in two separate FIT files per round:
 
 This app reads both files, links them by timestamp, and presents a combined view of golf performance and health data.
 
+## Download
+
+Pre-built macOS binaries are available on the [Releases page](https://github.com/nicechester/garmin-golf-analyzier/releases).
+
 ## Screenshots
 
 ### Overview
