@@ -171,9 +171,9 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
             }
             MESG_SWING => {
                 let ts = match field_i64(record, 253) { Some(v) => v, None => continue };
-                if let (Some(back_ms), Some(down_cs)) = (field_any_f32(record, 0), field_any_f32(record, 3)) {
-                    if down_cs > 0.0 {
-                        let ratio = back_ms / (down_cs * 10.0); // f0=ms, f3=centiseconds
+                if let Some(down_tenths) = field_any_f32(record, 3) {
+                    if down_tenths > 0.0 {
+                        let ratio = down_tenths / 10.0; // f3 is ratio × 10
                         if ratio >= 1.5 && ratio <= 6.0 {
                             tempo_samples.push(TempoSample { timestamp: ts, ratio });
                         }
