@@ -222,6 +222,10 @@ function renderDetailTabs() {
 function buildHeader(round, sc, dateStr, timeStr) {
     const alt   = fmtAlt(round.min_altitude_meters, round.max_altitude_meters);
     const tempo = fmtTempo(round.avg_swing_tempo);
+    // Use scored_par (holes played) not total_par (full course)
+    const parMap    = sc ? Object.fromEntries(sc.hole_definitions.map(h => [h.hole_number, h])) : {};
+    const scoredPar = sc ? sc.hole_scores.reduce((s, hs) => s + (parMap[hs.hole_number]?.par ?? 0), 0) : 0;
+    const overPar   = sc ? sc.total_score - scoredPar : 0;
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <div class="flex items-start justify-between">
@@ -232,9 +236,9 @@ function buildHeader(round, sc, dateStr, timeStr) {
             </div>
             ${sc ? `
             <div class="text-center">
-                <div class="score-badge ${scoreClass(sc.total_score - sc.total_par)} w-16 h-16 text-2xl">${sc.total_score}</div>
-                <div class="text-sm font-medium mt-1 ${sc.total_score - sc.total_par > 0 ? 'text-red-600' : 'text-green-600'}">
-                    ${overParStr(sc.total_score - sc.total_par)}
+                <div class="score-badge ${scoreClass(overPar)} w-16 h-16 text-2xl">${sc.total_score}</div>
+                <div class="text-sm font-medium mt-1 ${overPar > 0 ? 'text-red-600' : 'text-green-600'}">
+                    ${overParStr(overPar)}
                 </div>
             </div>` : ''}
         </div>
@@ -475,15 +479,17 @@ function renderTimelineChart(round) {
 // Show a shot's position on the timeline chart as a yellow indicator.
 function showShotOnTimeline(shot) {
     if (!shot.timestamp || !activeTimelinePts.length) return;
-    // Find closest downsampled point by timestamp
     let closestIdx = 0, closestDiff = Infinity;
     activeTimelinePts.forEach((s, i) => {
         const diff = Math.abs(s.timestamp - shot.timestamp);
         if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
     });
     if (window._setShotIndicator) window._setShotIndicator(closestIdx);
-    // Scroll timeline into view
     document.getElementById('timeline-chart')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function clearShotIndicator() {
+    if (window._setShotIndicator) window._setShotIndicator(null);
 }
 
 // Zoom the timeline chart to a hole's time window, or reset to full round.
@@ -515,6 +521,8 @@ function zoomTimeline(holeFilter) {
 
 function buildScorecard(sc) {
     const parMap = Object.fromEntries(sc.hole_definitions.map(h => [h.hole_number, h]));
+    // Sum par only for holes actually played
+    const scoredPar = sc.hole_scores.reduce((sum, hs) => sum + (parMap[hs.hole_number]?.par ?? 0), 0);
     const rows = sc.hole_scores.map(hs => {
         const def  = parMap[hs.hole_number];
         const par  = def?.par || 0;
@@ -563,8 +571,8 @@ function buildScorecard(sc) {
                 <tbody>${rows}</tbody>
                 <tfoot>
                     <tr class="font-bold bg-gray-50">
-                        <td>Total</td><td>${sc.total_par}</td><td></td><td></td>
-                        <td>${sc.total_score} (${overParStr(sc.total_score - sc.total_par)})</td>
+                        <td>Total</td><td>${scoredPar}</td><td></td><td></td>
+                        <td>${sc.total_score} (${overParStr(sc.total_score - scoredPar)})</td>
                         <td>${sc.total_putts}</td><td></td><td></td>
                     </tr>
                 </tfoot>
@@ -733,67 +741,107 @@ function renderShotMap(round) {
     const holeLayers = {};
     sc.hole_scores.forEach(hs => { holeLayers[hs.hole_number] = L.layerGroup().addTo(activeMap); });
 
-    // Draw shots
+    // Draw shots (including putts)
+    // Build per-hole shot index for putt count lookup
+    const holePutts = {};
+    sc.hole_scores.forEach(hs => { holePutts[hs.hole_number] = hs.putts; });
+
     allShots.forEach((shot, idx) => {
         const layer = holeLayers[shot.hole_number];
         if (!layer) return;
 
-        const cat   = shot.club_category ?? 'unknown';
-        const color = CLUB_COLORS[cat] ?? CLUB_COLORS.unknown;
-        const club  = shot.club_name ?? cat;
-        const dist  = shot.distance_meters ? `${Math.round(shot.distance_meters)}m` : '';
-        const hr    = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
-        const alt   = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
+        const cat    = shot.club_category ?? 'unknown';
+        const color  = CLUB_COLORS[cat] ?? CLUB_COLORS.unknown;
+        const club   = shot.club_name ?? (cat === 'putt' ? 'Putter' : cat);
+        const dist   = shot.distance_meters ? `${Math.round(shot.distance_meters)}m` : '';
+        const hr     = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
+        const alt    = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
+        const isPutt = cat === 'putt';
 
-        // Arrow line from → to
+        // Line: dashed + thinner for putts, solid arrow for other shots
         const line = L.polyline(
             [[shot.from.lat, shot.from.lon], [shot.to.lat, shot.to.lon]],
-            { color, weight: 2.5, opacity: 0.85 }
+            { color, weight: isPutt ? 1.5 : 2.5, opacity: 0.85,
+              dashArray: isPutt ? '4 4' : null }
         ).addTo(layer);
 
-        // Circle at shot origin
+        // Circle at shot origin: smaller for putts
         const shotNum = idx + 1;
         const circle = L.circleMarker([shot.from.lat, shot.from.lon], {
-            radius: 6, color: 'white', weight: 1.5,
+            radius: isPutt ? 4 : 6,
+            color: 'white', weight: 1.5,
             fillColor: color, fillOpacity: 1,
         }).addTo(layer);
 
+        // Popup content — putts show hole putt count
+        const puttsLine = isPutt ? `Putts this hole: ${holePutts[shot.hole_number] ?? '?'}` : null;
         const popupLines = [
-            `<b>H${shot.hole_number} Shot ${shotNum}</b>`,
+            `<b>H${shot.hole_number} ${isPutt ? 'Putt' : `Shot ${shotNum}`}</b>`,
             `Club: ${club}`,
-            dist  ? `Distance: ${dist}` : null,
-            hr    ? `HR: ${hr}` : null,
-            alt   ? `Alt: ${alt}` : null,
+            dist      ? `Distance: ${dist}` : null,
+            puttsLine,
+            hr        ? `HR: ${hr}` : null,
+            alt       ? `Alt: ${alt}` : null,
         ].filter(Boolean).join('<br>');
 
-        circle.bindPopup(popupLines);
-        line.bindPopup(popupLines);
+        const popup = L.popup({ closeButton: false, offset: [0, -4] }).setContent(popupLines);
+        circle.bindPopup(popup);
+        line.bindPopup(popup);
 
-        // On click: show popup AND highlight on timeline
-        circle.on('click', () => { circle.openPopup(); showShotOnTimeline(shot); });
-        line.on('click',   () => { line.openPopup();   showShotOnTimeline(shot); });
+        // Hover: open popup + show timeline indicator; mouseout: close + clear
+        const onOver = () => { circle.openPopup(); showShotOnTimeline(shot); };
+        const onOut  = () => { circle.closePopup(); clearShotIndicator(); };
+        circle.on('mouseover', onOver).on('mouseout', onOut);
+        line.on('mouseover',   () => { line.openPopup(); showShotOnTimeline(shot); })
+            .on('mouseout',    onOut);
 
-        // Arrowhead at destination
-        L.circleMarker([shot.to.lat, shot.to.lon], {
-            radius: 3, color, weight: 0,
-            fillColor: color, fillOpacity: 0.6,
-        }).addTo(layer);
+        // Arrowhead dot at destination (skip for putts — destination is the hole)
+        if (!isPutt) {
+            L.circleMarker([shot.to.lat, shot.to.lon], {
+                radius: 3, color, weight: 0,
+                fillColor: color, fillOpacity: 0.6,
+            }).addTo(layer);
+        }
     });
 
-    // Hole number labels at tee positions
+    // Hole number circles at tee positions — hover shows score + putts
+    const holeScoreMap = {};
+    sc.hole_scores.forEach(hs => { holeScoreMap[hs.hole_number] = hs; });
+
     sc.hole_definitions.forEach(hd => {
         if (!hd.tee_position) return;
-        L.marker([hd.tee_position.lat, hd.tee_position.lon], {
+        const hs  = holeScoreMap[hd.hole_number];
+        const par = hd.par;
+        const score = hs?.score;
+        const putts = hs?.putts;
+        const diff  = score != null ? score - par : null;
+        const diffStr = diff === 0 ? 'E' : diff > 0 ? `+${diff}` : `${diff}`;
+        const distYds = hd.distance_cm ? Math.round(hd.distance_cm / 91.44) : null;
+
+        const popupHtml = `
+            <div style="min-width:120px">
+                <b>Hole ${hd.hole_number}</b><br>
+                Par ${par}${distYds ? ` · ${distYds} yds` : ''}<br>
+                ${score != null ? `Score: <b>${score}</b> (${diffStr})<br>` : ''}
+                ${putts != null ? `Putts: <b>${putts}</b>` : ''}
+            </div>`;
+
+        const marker = L.marker([hd.tee_position.lat, hd.tee_position.lon], {
             icon: L.divIcon({
                 className: '',
                 html: `<div style="background:#1e40af;color:white;border-radius:50%;
                     width:20px;height:20px;display:flex;align-items:center;
                     justify-content:center;font-size:10px;font-weight:700;
-                    border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4)">
+                    border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4);
+                    cursor:pointer">
                     ${hd.hole_number}</div>`,
                 iconSize: [20, 20], iconAnchor: [10, 10],
             })
         }).addTo(activeMap);
+
+        marker.bindPopup(L.popup({ closeButton: false, offset: [0, -10] }).setContent(popupHtml));
+        marker.on('mouseover', () => marker.openPopup());
+        marker.on('mouseout',  () => marker.closePopup());
     });
 
     // Legend
