@@ -315,6 +315,17 @@ function renderTimelineChart(round) {
     const altData    = pts.map(s => s.altitude_meters != null ? +s.altitude_meters.toFixed(1) : null);
     const stressData = pts.map(s => s.stress_proxy ?? null);
 
+    // Build tempo data — sparse samples mapped onto the health timeline index
+    const tempoData = new Array(pts.length).fill(null);
+    (round.tempo_timeline ?? []).forEach(t => {
+        let closestIdx = 0, closestDiff = Infinity;
+        pts.forEach((s, i) => {
+            const diff = Math.abs(s.timestamp - t.timestamp);
+            if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
+        });
+        tempoData[closestIdx] = +t.ratio.toFixed(2);
+    });
+
     // Build hole markers and store in shared variable
     activeHoleMarkers = [];
     const sc = round.scorecard;
@@ -441,6 +452,18 @@ function renderTimelineChart(round) {
                     borderDash: [4, 2],
                     spanGaps: true,
                 },
+                {
+                    label: 'Tempo (ratio)',
+                    data: tempoData,
+                    borderColor: 'rgb(16,185,129)',
+                    backgroundColor: 'rgb(16,185,129)',
+                    borderWidth: 0,
+                    pointRadius: tempoData.map(v => v !== null ? 5 : 0),
+                    pointStyle: 'circle',
+                    showLine: false,
+                    yAxisID: 'yTempo',
+                    spanGaps: false,
+                },
             ]
         },
         options: {
@@ -470,6 +493,15 @@ function renderTimelineChart(round) {
                     title: { display: true, text: 'Altitude (m)', font: { size: 11 } },
                     ticks: { font: { size: 10 } },
                     grid: { drawOnChartArea: false },
+                },
+                yTempo: {
+                    type: 'linear',
+                    position: 'right',
+                    title: { display: true, text: 'Tempo', font: { size: 11 } },
+                    ticks: { font: { size: 10 }, callback: v => `${v.toFixed(1)}:1` },
+                    grid: { drawOnChartArea: false },
+                    min: 1.5,
+                    max: 6.0,
                 },
             }
         }

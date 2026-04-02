@@ -133,7 +133,7 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
     let mut raw_shots: Vec<(i64, bool)> = Vec::new();
     let mut alt_min: Option<f32> = None;
     let mut alt_max: Option<f32> = None;
-    let mut tempo_samples: Vec<f32> = Vec::new();
+    let mut tempo_samples: Vec<TempoSample> = Vec::new();
 
     for record in &records {
         match mesg_num(record) {
@@ -170,10 +170,13 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
                 }
             }
             MESG_SWING => {
-                if let (Some(back), Some(down)) = (field_any_f32(record, 2), field_any_f32(record, 3)) {
-                    if down > 0.0 && back > 0.0 {
-                        let ratio = back / down;
-                        if ratio >= 1.5 && ratio <= 6.0 { tempo_samples.push(ratio); }
+                let ts = match field_i64(record, 253) { Some(v) => v, None => continue };
+                if let (Some(back_ms), Some(down_cs)) = (field_any_f32(record, 0), field_any_f32(record, 3)) {
+                    if down_cs > 0.0 {
+                        let ratio = back_ms / (down_cs * 10.0); // f0=ms, f3=centiseconds
+                        if ratio >= 1.5 && ratio <= 6.0 {
+                            tempo_samples.push(TempoSample { timestamp: ts, ratio });
+                        }
                     }
                 }
             }
@@ -188,7 +191,7 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
     }
 
     let avg_swing_tempo = if tempo_samples.is_empty() { None }
-        else { Some(tempo_samples.iter().sum::<f32>() / tempo_samples.len() as f32) };
+        else { Some(tempo_samples.iter().map(|s| s.ratio).sum::<f32>() / tempo_samples.len() as f32) };
 
     // Build health index for shot correlation
     let health_index: BTreeMap<i64, usize> = health.iter().enumerate()
@@ -231,7 +234,7 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
         calories, avg_heart_rate: avg_hr, max_heart_rate: max_hr,
         total_ascent: ascent, total_descent: descent,
         min_altitude_meters: alt_min, max_altitude_meters: alt_max,
-        avg_swing_tempo, shots, health_timeline: health,
+        avg_swing_tempo, tempo_timeline: tempo_samples, shots, health_timeline: health,
         scorecard: None, clubs: Vec::new(),
     })
 }

@@ -131,6 +131,14 @@ impl ClubInfo {
     pub fn avg_distance_meters(&self) -> f64 { self.avg_distance_cm as f64 / 100.0 }
 }
 
+// ── Swing Tempo ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TempoSample {
+    pub timestamp: i64,   // Garmin epoch
+    pub ratio: f32,       // backswing/downswing ratio (e.g. 3.0 = 3:1)
+}
+
 // ── Health ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,6 +256,7 @@ pub struct GolfRound {
     pub min_altitude_meters: Option<f32>,
     pub max_altitude_meters: Option<f32>,
     pub avg_swing_tempo: Option<f32>,
+    pub tempo_timeline: Vec<TempoSample>,
     pub shots: Vec<GolfShot>,
     pub health_timeline: Vec<HealthSample>,
     pub scorecard: Option<Scorecard>,
