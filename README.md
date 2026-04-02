@@ -16,6 +16,8 @@ This app reads both files, links them by timestamp, and presents a combined view
 ### Overview Tab
 Round summary with score, distance walked, calories, avg/max HR, altitude range, and avg swing tempo. Includes a hole-by-hole scorecard with color-coded results (eagle/birdie/par/bogey), GIR, fairways hit, and a health section showing Body Battery drain, stress, and HR zone breakdown.
 
+![Overview](images/overview.png)
+
 ### Shot Map Tab
 Interactive Leaflet map showing every shot as a colored line and dot, color-coded by club category (Driver, Fairway Wood, Iron, Wedge, Putter). Features:
 - Hole selector buttons to zoom into individual holes
@@ -46,11 +48,6 @@ The ✨ Ask AI button builds a comprehensive markdown prompt from all round data
 ## Download
 
 Pre-built macOS binaries are available on the [Releases page](https://github.com/nicechester/garmin-golf-analyzier/releases).
-
-## Screenshots
-
-### Overview
-![Overview](images/overview.png)
 
 ## Architecture
 
