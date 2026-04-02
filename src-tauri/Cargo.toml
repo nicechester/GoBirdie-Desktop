@@ -1,6 +1,6 @@
 [package]
 name = "garmin-analyzer"
-version = "0.1.1"
+version = "0.1.2"
 description = "Garmin golf round analyzer"
 authors = ["Chester Kim"]
 edition = "2021"
