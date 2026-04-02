@@ -936,13 +936,17 @@ function renderShotMap(round) {
         const marker = L.marker([hd.tee_position.lat, hd.tee_position.lon], {
             icon: L.divIcon({
                 className: '',
-                html: `<div style="background:#1e40af;color:white;border-radius:50%;
-                    width:20px;height:20px;display:flex;align-items:center;
-                    justify-content:center;font-size:10px;font-weight:700;
-                    border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4);
-                    cursor:pointer">
-                    ${hd.hole_number}</div>`,
-                iconSize: [20, 20], iconAnchor: [10, 10],
+                html: `<div style="display:flex;flex-direction:column;align-items:center;pointer-events:none">
+                    <div style="background:#1e40af;color:white;border-radius:50%;
+                        width:20px;height:20px;display:flex;align-items:center;
+                        justify-content:center;font-size:10px;font-weight:700;
+                        border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4);
+                        cursor:pointer">${hd.hole_number}</div>
+                    ${putts != null ? `<div style="font-size:9px;font-weight:600;color:#1e40af;
+                        background:rgba(255,255,255,0.9);border-radius:3px;
+                        padding:0 3px;margin-top:2px;white-space:nowrap">${putts}p</div>` : ''}
+                </div>`,
+                iconSize: [20, 34], iconAnchor: [10, 10],
             })
         }).addTo(activeMap);
 
