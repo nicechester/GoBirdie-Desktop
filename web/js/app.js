@@ -875,11 +875,11 @@ function renderShotMap(round) {
     const holePutts = {};
     sc.hole_scores.forEach(hs => { holePutts[hs.hole_number] = hs.putts; });
 
-    // Pre-compute green position (last shot destination) per hole for deviation calc
-    const holeGreens = {};
+    // Pre-compute hole bearing (tee→green) per hole — matches Course Stats deviation calc
+    const holeBearings = {};
     sc.hole_scores.forEach(hs => {
         if (!hs.shots.length) return;
-        holeGreens[hs.hole_number] = hs.shots[hs.shots.length - 1].to;
+        holeBearings[hs.hole_number] = bearing(hs.shots[0].from, hs.shots[hs.shots.length - 1].to);
     });
 
     allShots.forEach((shot, idx) => {
@@ -909,13 +909,11 @@ function renderShotMap(round) {
             fillColor: color, fillOpacity: 1,
         }).addTo(layer);
 
-        // Direction arrow for non-putt shots — deviation from shot origin → green
+        // Direction arrow for non-putt shots — deviation from hole bearing (tee→green)
         let dirHtml = '';
-        const green = holeGreens[shot.hole_number];
-        if (!isPutt && green) {
+        if (!isPutt && holeBearings[shot.hole_number] != null) {
             const shotBear = bearing(shot.from, shot.to);
-            const targetBear = bearing(shot.from, green);
-            dirHtml = dirArrowSvg(deviation(shotBear, targetBear));
+            dirHtml = dirArrowSvg(deviation(shotBear, holeBearings[shot.hole_number]));
         }
 
         // Popup content — 2-column layout
