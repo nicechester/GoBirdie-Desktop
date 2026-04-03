@@ -736,6 +736,40 @@ function buildShotMap(round) {
     </div>`;
 }
 
+// Mini HR sparkline for shot popups — shows ±5 min of HR around the shot timestamp
+function hrSparkline(shot, healthTimeline) {
+    if (!shot.timestamp || !healthTimeline?.length) return '';
+    const W = 120, H = 32, PAD = 2;
+    const windowSec = 300; // ±5 min
+    const pts = healthTimeline.filter(s =>
+        s.heart_rate != null &&
+        Math.abs(s.timestamp - shot.timestamp) <= windowSec
+    );
+    if (pts.length < 3) return '';
+    const hrs = pts.map(s => s.heart_rate);
+    const minHr = Math.min(...hrs), maxHr = Math.max(...hrs);
+    const range = maxHr - minHr || 1;
+    const xStep = (W - PAD * 2) / (pts.length - 1);
+    const toY = v => PAD + (H - PAD * 2) * (1 - (v - minHr) / range);
+    const line = pts.map((s, i) => `${PAD + i * xStep},${toY(s.heart_rate)}`).join(' ');
+    // Shot position marker
+    let markerX = null;
+    let closestDiff = Infinity;
+    pts.forEach((s, i) => {
+        const d = Math.abs(s.timestamp - shot.timestamp);
+        if (d < closestDiff) { closestDiff = d; markerX = PAD + i * xStep; }
+    });
+    const marker = markerX != null
+        ? `<line x1="${markerX}" y1="0" x2="${markerX}" y2="${H}" stroke="#facc15" stroke-width="1.5"/>`
+        : '';
+    return `<svg width="${W}" height="${H}" style="display:block;margin:4px 0 0">
+        <polyline points="${line}" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+        ${marker}
+        <text x="1" y="9" font-size="8" fill="#999">${maxHr}</text>
+        <text x="1" y="${H - 1}" font-size="8" fill="#999">${minHr}</text>
+    </svg>`;
+}
+
 const CLUB_COLORS = {
     tee:          '#ef4444',  // red
     fairway_wood: '#f97316',  // orange
@@ -843,12 +877,13 @@ function renderShotMap(round) {
 
         // Popup content — putts show hole putt count
         const puttsLine = isPutt ? `Putts this hole: ${holePutts[shot.hole_number] ?? '?'}` : null;
+        const spark = hr ? hrSparkline(shot, round.health_timeline) : '';
         const popupLines = [
             `<b>H${shot.hole_number} ${isPutt ? 'Putt' : `Shot ${shotNum}`}</b>`,
             `Club: ${club}`,
             dist      ? `Distance: ${dist}` : null,
             puttsLine,
-            hr        ? `HR: ${hr}` : null,
+            hr        ? `HR: ${hr}${spark}` : null,
             alt       ? `Alt: ${alt}` : null,
             shot.swing_tempo != null ? `Tempo: ${shot.swing_tempo.toFixed(1)}:1` : null,
         ].filter(Boolean).join('<br>');
