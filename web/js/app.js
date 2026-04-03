@@ -1409,33 +1409,33 @@ function buildClubSummary(enriched) {
 
 // ── Strokes Gained (Broadie / Every Shot Counts) ─────────────────────────────
 
-// 15-handicap baseline: expected strokes to hole out from given distance (yards).
-// Sources: Mark Broadie "Every Shot Counts" amateur tables, interpolated.
+// Single-digit handicap baseline: expected strokes to hole out from given distance (yards).
+// Sources: Mark Broadie "Every Shot Counts" scratch/single-digit amateur tables, interpolated.
 // Keys: distance in yards → expected strokes. We interpolate between entries.
 const SG_BASELINE_TEE = [
     // distance, expected strokes (from tee box)
-    [100, 2.92], [125, 2.99], [150, 3.07], [175, 3.17], [200, 3.32],
-    [225, 3.45], [250, 3.58], [275, 3.71], [300, 3.84], [325, 3.97],
-    [350, 4.08], [375, 4.17], [400, 4.28], [425, 4.41], [450, 4.54],
-    [475, 4.65], [500, 4.79], [525, 4.92], [550, 5.06], [575, 5.19], [600, 5.32],
+    [100, 2.72], [125, 2.78], [150, 2.85], [175, 2.94], [200, 3.06],
+    [225, 3.17], [250, 3.28], [275, 3.39], [300, 3.50], [325, 3.61],
+    [350, 3.71], [375, 3.80], [400, 3.90], [425, 4.01], [450, 4.12],
+    [475, 4.22], [500, 4.33], [525, 4.45], [550, 4.57], [575, 4.68], [600, 4.80],
 ];
 const SG_BASELINE_FAIRWAY = [
     // distance, expected strokes (from fairway)
-    [20, 2.70], [30, 2.75], [40, 2.80], [50, 2.87], [60, 2.93],
-    [80, 3.02], [100, 3.12], [120, 3.25], [140, 3.39], [150, 3.47],
-    [160, 3.54], [175, 3.65], [200, 3.82], [225, 4.00], [250, 4.18], [275, 4.36],
+    [20, 2.45], [30, 2.50], [40, 2.55], [50, 2.61], [60, 2.67],
+    [80, 2.76], [100, 2.85], [120, 2.96], [140, 3.08], [150, 3.15],
+    [160, 3.21], [175, 3.31], [200, 3.46], [225, 3.62], [250, 3.78], [275, 3.94],
 ];
 const SG_BASELINE_ROUGH = [
-    // distance, expected strokes (from rough — ~0.2 penalty over fairway)
-    [20, 2.86], [30, 2.92], [40, 2.97], [50, 3.05], [60, 3.12],
-    [80, 3.22], [100, 3.33], [120, 3.47], [140, 3.62], [150, 3.70],
-    [160, 3.78], [175, 3.90], [200, 4.08], [225, 4.27], [250, 4.46],
+    // distance, expected strokes (from rough — ~0.15-0.2 penalty over fairway)
+    [20, 2.60], [30, 2.65], [40, 2.71], [50, 2.78], [60, 2.84],
+    [80, 2.94], [100, 3.04], [120, 3.16], [140, 3.29], [150, 3.36],
+    [160, 3.43], [175, 3.53], [200, 3.69], [225, 3.86], [250, 4.03],
 ];
 const SG_BASELINE_GREEN = [
-    // distance in feet, expected putts
-    [1, 1.00], [2, 1.04], [3, 1.14], [4, 1.23], [5, 1.33],
-    [6, 1.42], [8, 1.56], [10, 1.67], [15, 1.82], [20, 1.93],
-    [25, 2.03], [30, 2.12], [40, 2.25], [50, 2.35], [60, 2.44], [90, 2.64],
+    // distance in feet, expected putts (single-digit: better from short range)
+    [1, 1.00], [2, 1.01], [3, 1.07], [4, 1.15], [5, 1.24],
+    [6, 1.33], [8, 1.47], [10, 1.58], [15, 1.73], [20, 1.84],
+    [25, 1.94], [30, 2.03], [40, 2.16], [50, 2.27], [60, 2.36], [90, 2.55],
 ];
 
 function interpolateBaseline(table, dist) {
@@ -1689,7 +1689,7 @@ function buildStrokesGainedTab(round) {
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-1">Strokes Gained</h3>
-        <p class="text-xs text-gray-400 mb-4">Based on Mark Broadie's Every Shot Counts · 15-handicap baseline</p>
+        <p class="text-xs text-gray-400 mb-4">Based on Mark Broadie's Every Shot Counts · single-digit handicap baseline</p>
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             ${totalCard}
             ${catCards}
@@ -1719,7 +1719,7 @@ function buildStrokesGainedTab(round) {
     </div>
     <div class="bg-gray-50 rounded-xl border border-gray-200 p-6 text-sm text-gray-500 leading-relaxed">
         <h4 class="font-semibold text-gray-600 mb-2">How Strokes Gained Works</h4>
-        <p class="mb-2">Strokes Gained, developed by Mark Broadie in <i>Every Shot Counts</i>, measures each shot's value by comparing your result to what a benchmark golfer (here, a 15-handicap) would expect from the same position.</p>
+        <p class="mb-2">Strokes Gained, developed by Mark Broadie in <i>Every Shot Counts</i>, measures each shot's value by comparing your result to what a benchmark golfer (here, a single-digit handicap) would expect from the same position.</p>
         <p class="mb-2"><b>SG = Expected strokes before − 1 − Expected strokes after.</b> A positive value means you gained strokes (did better than baseline); negative means you lost strokes.</p>
         <div class="grid grid-cols-2 gap-x-6 gap-y-1 mt-3 text-xs">
             <div><span class="font-medium text-gray-600">SG: Off the Tee</span> — Tee shots on par 4s and 5s</div>
@@ -1727,7 +1727,7 @@ function buildStrokesGainedTab(round) {
             <div><span class="font-medium text-gray-600">SG: Short Game</span> — Non-putt shots within 50 yards</div>
             <div><span class="font-medium text-gray-600">SG: Putting</span> — All putts on the green</div>
         </div>
-        <p class="mt-3 text-xs text-gray-400">Lie detection is approximate — fairway/rough is inferred from the fairway-hit flag on tee shots. Baseline data is interpolated from Broadie's published 15-handicap amateur tables.</p>
+        <p class="mt-3 text-xs text-gray-400">Lie detection is approximate — fairway/rough is inferred from the fairway-hit flag on tee shots. Baseline data is interpolated from Broadie's published single-digit handicap tables.</p>
     </div>`;
 }
 
@@ -2076,7 +2076,7 @@ function buildAiPrompt(round) {
     // Strokes Gained summary
     const sg = computeStrokesGained(round);
     if (sg) {
-        L.push('\n## Strokes Gained (15-handicap baseline)');
+        L.push('\n## Strokes Gained (single-digit handicap baseline)');
         L.push(`Total: ${sg.total >= 0 ? '+' : ''}${sg.total.toFixed(2)}`);
         const catNames = { off_tee: 'Off the Tee', approach: 'Approach', short_game: 'Short Game', putting: 'Putting' };
         Object.entries(catNames).forEach(([k, v]) => {
