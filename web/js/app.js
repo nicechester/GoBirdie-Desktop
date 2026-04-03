@@ -1682,6 +1682,9 @@ function buildStrokesGainedTab(round) {
                 </div>`).join('')}
         </div>`;
 
+    // Club analysis: merge SG shots with direction data
+    const clubAnalysis = buildClubAnalysis(round, sg);
+
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-1">Strokes Gained</h3>
@@ -1696,6 +1699,7 @@ function buildStrokesGainedTab(round) {
             ${shotListHtml(worst3, '💀 Worst Shots')}
         </div>
     </div>
+    ${clubAnalysis}
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-4">Per-Hole Breakdown</h3>
         <div class="overflow-x-auto">
@@ -1722,6 +1726,125 @@ function buildStrokesGainedTab(round) {
             <div><span class="font-medium text-gray-600">SG: Putting</span> — All putts on the green</div>
         </div>
         <p class="mt-3 text-xs text-gray-400">Lie detection is approximate — fairway/rough is inferred from the fairway-hit flag on tee shots. Baseline data is interpolated from Broadie's published 15-handicap amateur tables.</p>
+    </div>`;
+}
+
+function buildClubAnalysis(round, sg) {
+    const sc = round.scorecard;
+    if (!sc?.hole_scores?.length) return '';
+
+    // Build direction data per shot keyed by hole-shotIdx
+    const dirMap = {};
+    sc.hole_scores.forEach(hs => {
+        const shots = hs.shots;
+        if (!shots.length) return;
+        const holeBear = bearing(shots[0].from, shots[shots.length - 1].to);
+        shots.forEach((shot, idx) => {
+            const cat = shot.club_category ?? 'unknown';
+            if (cat === 'putt') return;
+            const dist = metersToYards(distMeters(shot.from, shot.to));
+            const shotBear = bearing(shot.from, shot.to);
+            const dev = deviation(shotBear, holeBear);
+            dirMap[`${hs.hole_number}-${idx}`] = { dev, dist };
+        });
+    });
+
+    // Group by club
+    const byClub = {};
+    sg.shots.forEach(s => {
+        if (s.cat === 'putting') return;
+        if (!byClub[s.club]) byClub[s.club] = [];
+        const dir = dirMap[`${s.hole}-${s.shotIdx}`];
+        byClub[s.club].push({ ...s, dev: dir?.dev ?? 0, distYds: dir?.dist ?? s.distBefore });
+    });
+
+    const stdDev = (arr) => {
+        if (arr.length < 2) return 0;
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+        return Math.sqrt(arr.reduce((a, v) => a + (v - mean) ** 2, 0) / (arr.length - 1));
+    };
+
+    const clubs = Object.entries(byClub)
+        .filter(([, shots]) => shots.length >= 2)
+        .map(([name, shots]) => {
+            const dists = shots.map(s => s.distYds);
+            const devs = shots.map(s => s.dev);
+            const sgs = shots.map(s => s.sg);
+            const avgDist = dists.reduce((a, b) => a + b, 0) / dists.length;
+            const distStd = stdDev(dists);
+            const avgDev = devs.reduce((a, b) => a + b, 0) / devs.length;
+            const devStd = stdDev(devs);
+            const avgSg = sgs.reduce((a, b) => a + b, 0) / sgs.length;
+            const left = shots.filter(s => s.dev <= -15).length;
+            const right = shots.filter(s => s.dev >= 15).length;
+            const straight = shots.length - left - right;
+
+            let tendency;
+            if (Math.abs(avgDev) < 5) tendency = { label: 'Neutral', color: '#22c55e' };
+            else if (avgDev < -5) tendency = { label: `Left bias (${Math.round(avgDev)}°)`, color: '#3b82f6' };
+            else tendency = { label: `Right bias (+${Math.round(avgDev)}°)`, color: '#f97316' };
+
+            // Consistency rating based on distance CV (coefficient of variation)
+            const cv = avgDist > 0 ? distStd / avgDist : 0;
+            let consistency;
+            if (cv < 0.05) consistency = { label: 'Very consistent', color: '#16a34a', stars: '★★★' };
+            else if (cv < 0.10) consistency = { label: 'Consistent', color: '#22c55e', stars: '★★☆' };
+            else if (cv < 0.18) consistency = { label: 'Moderate', color: '#eab308', stars: '★☆☆' };
+            else consistency = { label: 'Inconsistent', color: '#ef4444', stars: '☆☆☆' };
+
+            return { name, shots: shots.length, avgDist, distStd, avgDev, devStd, avgSg, left, right, straight, tendency, consistency };
+        })
+        .sort((a, b) => b.avgDist - a.avgDist);
+
+    if (!clubs.length) return '';
+
+    const rows = clubs.map(c => {
+        const total = c.shots;
+        const lPct = (c.left / total * 100).toFixed(0);
+        const sPct = (c.straight / total * 100).toFixed(0);
+        const rPct = (c.right / total * 100).toFixed(0);
+        // Mini direction bar
+        const dirBar = `<div class="flex h-3 rounded-full overflow-hidden" style="width:80px">
+            <div class="bg-blue-400" style="width:${lPct}%"></div>
+            <div class="bg-green-400" style="width:${sPct}%"></div>
+            <div class="bg-orange-400" style="width:${rPct}%"></div>
+        </div>`;
+
+        return `
+        <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-2.5 text-sm font-medium">${c.name}</td>
+            <td class="py-2.5 text-xs text-gray-400 text-center">${c.shots}</td>
+            <td class="py-2.5 text-sm">${Math.round(c.avgDist)} <span class="text-xs text-gray-400">±${Math.round(c.distStd)}</span></td>
+            <td class="py-2.5"><span style="color:${c.consistency.color}" class="text-xs font-medium">${c.consistency.stars} ${c.consistency.label}</span></td>
+            <td class="py-2.5">
+                <div class="flex items-center gap-2">
+                    ${dirBar}
+                    <span class="text-xs" style="color:${c.tendency.color}">${c.tendency.label}</span>
+                </div>
+            </td>
+            <td class="py-2.5 text-sm font-medium" style="color:${sgColor(c.avgSg)}">
+                ${c.avgSg >= 0 ? '+' : ''}${c.avgSg.toFixed(2)}
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">Club Analysis</h3>
+        <p class="text-xs text-gray-400 mb-4">Mis-shot tendency and consistency per club (min 2 shots)</p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-xs text-gray-400 border-b">
+                    <th class="text-left py-1">Club</th>
+                    <th class="text-center py-1">Shots</th>
+                    <th class="text-left py-1">Avg Dist</th>
+                    <th class="text-left py-1">Consistency</th>
+                    <th class="text-left py-1">Tendency</th>
+                    <th class="text-left py-1">Avg SG</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
     </div>`;
 }
 
