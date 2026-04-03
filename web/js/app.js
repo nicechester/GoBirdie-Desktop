@@ -725,7 +725,13 @@ function buildShotMap(round) {
         <div id="shot-map-wrapper">
             <div id="shot-map"></div>
         </div>
-        <div id="shot-legend" class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500"></div>
+        <div class="mt-3 flex items-center justify-between">
+            <div id="shot-legend" class="flex flex-wrap gap-3 text-xs text-gray-500"></div>
+            <button id="trail-toggle" class="px-3 py-1 text-xs rounded-full border border-gray-300
+                hover:bg-gray-50 transition flex items-center gap-1">
+                <span id="trail-icon">👣</span> Trail
+            </button>
+        </div>
     </div>
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-1">Round Timeline</h3>
@@ -1038,6 +1044,14 @@ function renderShotMap(round) {
         marker.on('mouseout',  () => marker.closePopup());
     });
 
+    // GPS trail layer from health_timeline
+    const trailPts = round.health_timeline
+        .filter(s => s.position?.lat && s.position?.lon)
+        .map(s => [s.position.lat, s.position.lon]);
+    const trailLayer = trailPts.length > 1
+        ? L.polyline(trailPts, { color: '#6366f1', weight: 2, opacity: 0.5, dashArray: '4 4' })
+        : null;
+
     // Legend
     const usedCats = [...new Set(allShots.map(s => s.club_category ?? 'unknown'))];
     const catLabels = { tee:'Driver/Tee', fairway_wood:'Fairway Wood', iron:'Iron',
@@ -1048,6 +1062,27 @@ function renderShotMap(round) {
                 border-radius:50%;display:inline-block"></span>
             ${catLabels[cat] ?? cat}
         </span>`).join('');
+
+    // Trail toggle
+    let trailVisible = false;
+    const trailBtn = document.getElementById('trail-toggle');
+    if (trailBtn && trailLayer) {
+        trailBtn.addEventListener('click', () => {
+            trailVisible = !trailVisible;
+            if (trailVisible) {
+                trailLayer.addTo(activeMap);
+                trailBtn.classList.add('bg-indigo-100', 'border-indigo-400', 'text-indigo-700');
+                trailBtn.classList.remove('border-gray-300');
+            } else {
+                activeMap.removeLayer(trailLayer);
+                trailBtn.classList.remove('bg-indigo-100', 'border-indigo-400', 'text-indigo-700');
+                trailBtn.classList.add('border-gray-300');
+            }
+        });
+    } else if (trailBtn && !trailLayer) {
+        trailBtn.disabled = true;
+        trailBtn.classList.add('opacity-40');
+    }
 
     // Hole filter buttons
     document.querySelectorAll('.hole-btn').forEach(btn => {
