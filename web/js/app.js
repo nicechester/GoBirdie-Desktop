@@ -1684,6 +1684,7 @@ function buildStrokesGainedTab(round) {
 
     // Club analysis: merge SG shots with direction data
     const clubAnalysis = buildClubAnalysis(round, sg);
+    const dispersion = buildDispersionHeatmaps(round, sg);
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
@@ -1700,6 +1701,7 @@ function buildStrokesGainedTab(round) {
         </div>
     </div>
     ${clubAnalysis}
+    ${dispersion}
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-4">Per-Hole Breakdown</h3>
         <div class="overflow-x-auto">
@@ -1844,6 +1846,167 @@ function buildClubAnalysis(round, sg) {
                 </tr></thead>
                 <tbody>${rows}</tbody>
             </table>
+        </div>
+    </div>`;
+}
+
+function buildDispersionHeatmaps(round, sg) {
+    const sc = round.scorecard;
+    if (!sc?.hole_scores?.length) return '';
+
+    // Build enriched shot data with direction deviation and distance accuracy
+    const shots = [];
+    sc.hole_scores.forEach(hs => {
+        const holeShots = hs.shots;
+        if (!holeShots.length) return;
+        const green = holeShots[holeShots.length - 1].to;
+        const holeBear = bearing(holeShots[0].from, green);
+
+        holeShots.forEach((shot, idx) => {
+            const cat = shot.club_category ?? 'unknown';
+            if (cat === 'putt') return;
+
+            const distToGreenBefore = metersToYards(distMeters(shot.from, green));
+            const distToGreenAfter = metersToYards(distMeters(shot.to, green));
+            const shotDist = metersToYards(distMeters(shot.from, shot.to));
+            const shotBear = bearing(shot.from, shot.to);
+            const dev = deviation(shotBear, holeBear);
+
+            // Distance accuracy: how far short/long of ideal
+            // Ideal = land exactly on the line to green, covering distToGreenBefore yards
+            // Positive = long, negative = short
+            const idealDist = distToGreenBefore;
+            const distDelta = shotDist - idealDist; // positive = long of target
+            const distPct = idealDist > 0 ? (distDelta / idealDist) * 100 : 0;
+
+            // Find matching SG
+            const sgShot = sg.shots.find(s => s.hole === hs.hole_number && s.shotIdx === idx);
+
+            shots.push({
+                hole: hs.hole_number,
+                club: shot.club_name ?? cat,
+                cat,
+                distToGreen: Math.round(distToGreenBefore),
+                shotDist: Math.round(shotDist),
+                dev,        // direction deviation in degrees
+                distDelta,  // yards long(+) or short(-)
+                distPct,    // % long/short
+                sg: sgShot?.sg ?? 0,
+            });
+        });
+    });
+
+    if (!shots.length) return '';
+
+    // Distance buckets
+    const buckets = [
+        { label: '0–50 yds',    min: 0,   max: 50 },
+        { label: '51–100 yds',  min: 51,  max: 100 },
+        { label: '101–150 yds', min: 101, max: 150 },
+        { label: '151–200 yds', min: 151, max: 200 },
+        { label: '200+ yds',    min: 201, max: 999 },
+    ];
+
+    // Direction bins and distance-result bins
+    const dirBins = [
+        { label: 'Far L',    min: -Infinity, max: -30 },
+        { label: 'Left',     min: -30,       max: -10 },
+        { label: 'Straight', min: -10,       max: 10 },
+        { label: 'Right',    min: 10,        max: 30 },
+        { label: 'Far R',    min: 30,        max: Infinity },
+    ];
+    const distBins = [
+        { label: 'Way Long',  min: 15,        max: Infinity },
+        { label: 'Long',      min: 5,         max: 15 },
+        { label: 'Good',      min: -5,         max: 5 },
+        { label: 'Short',     min: -15,        max: -5 },
+        { label: 'Way Short', min: -Infinity,  max: -15 },
+    ];
+
+    function classify(val, bins) {
+        for (const b of bins) {
+            if (val >= b.min && val < b.max) return b.label;
+        }
+        return bins[bins.length - 1].label;
+    }
+
+    // Build heatmaps per bucket
+    const heatmaps = buckets.map(bucket => {
+        const bucketShots = shots.filter(s => s.distToGreen >= bucket.min && s.distToGreen <= bucket.max);
+        if (bucketShots.length < 2) return null;
+
+        // Build grid: distBin rows × dirBin cols
+        const grid = {};
+        distBins.forEach(db => {
+            grid[db.label] = {};
+            dirBins.forEach(dirB => {
+                grid[db.label][dirB.label] = { count: 0, sgSum: 0 };
+            });
+        });
+
+        bucketShots.forEach(s => {
+            const dirLabel = classify(s.dev, dirBins);
+            const distLabel = classify(s.distPct, distBins);
+            grid[distLabel][dirLabel].count++;
+            grid[distLabel][dirLabel].sgSum += s.sg;
+        });
+
+        const maxCount = Math.max(1, ...Object.values(grid).flatMap(row =>
+            Object.values(row).map(c => c.count)
+        ));
+
+        // Render grid as HTML table
+        const headerCells = dirBins.map(d =>
+            `<th class="px-1 py-1 text-center" style="min-width:52px">${d.label}</th>`
+        ).join('');
+
+        const bodyRows = distBins.map(db => {
+            const cells = dirBins.map(dirB => {
+                const cell = grid[db.label][dirB.label];
+                if (cell.count === 0) return `<td class="px-1 py-1 text-center"><span class="text-gray-200">·</span></td>`;
+                const avgSg = cell.sgSum / cell.count;
+                const intensity = cell.count / maxCount;
+                // Blue intensity for count, text color for SG
+                const bg = `rgba(59,130,246,${(0.08 + intensity * 0.5).toFixed(2)})`;
+                const isGood = db.label === 'Good' && dirB.label === 'Straight';
+                return `<td class="px-1 py-1 text-center" style="background:${bg};border-radius:4px">
+                    <div class="text-sm font-bold" style="color:${sgColor(avgSg)}">${cell.count}</div>
+                    <div class="text-xs" style="color:${sgColor(avgSg)}">${avgSg >= 0 ? '+' : ''}${avgSg.toFixed(1)}</div>
+                </td>`;
+            }).join('');
+            return `<tr><td class="px-2 py-1 text-xs text-gray-500 text-right font-medium whitespace-nowrap">${db.label}</td>${cells}</tr>`;
+        }).join('');
+
+        const avgSgBucket = bucketShots.reduce((a, s) => a + s.sg, 0) / bucketShots.length;
+
+        return `
+        <div>
+            <div class="flex items-center gap-2 mb-2">
+                <span class="text-sm font-medium text-gray-700">${bucket.label}</span>
+                <span class="text-xs text-gray-400">${bucketShots.length} shots</span>
+                <span class="text-xs font-medium" style="color:${sgColor(avgSgBucket)}">avg SG ${avgSgBucket >= 0 ? '+' : ''}${avgSgBucket.toFixed(2)}</span>
+            </div>
+            <table class="text-xs">
+                <thead><tr><th></th>${headerCells}</tr></thead>
+                <tbody>${bodyRows}</tbody>
+            </table>
+        </div>`;
+    }).filter(Boolean);
+
+    if (!heatmaps.length) return '';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">Shot Dispersion</h3>
+        <p class="text-xs text-gray-400 mb-4">Where your shots land relative to target — count and avg SG per cell. Grouped by distance to green.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            ${heatmaps.join('')}
+        </div>
+        <div class="mt-4 flex items-center gap-4 text-xs text-gray-400">
+            <span>Cell = shot count + avg SG</span>
+            <span>Blue intensity = frequency</span>
+            <span style="color:#22c55e">● Gained</span>
+            <span style="color:#ef4444">● Lost</span>
         </div>
     </div>`;
 }
