@@ -2145,6 +2145,8 @@ function buildAnalyticsContext(round, sg, clubStats) {
     const overallDispersionAngle = allDevs.length
         ? allDevs.reduce((a, b) => a + b, 0) / allDevs.length : null;
 
+    const missBias = computeMissBiasPercentages(clubStats);
+
     return {
         round, sc, sg, clubStats,
         holesPlayed, onePutts, threePutts, fir, girPct, scramblingPct,
@@ -2156,6 +2158,10 @@ function buildAnalyticsContext(round, sg, clubStats) {
         avgTempo: round.avg_swing_tempo ?? null,
         worstClub, bestClub, driverClub, wedgeClub, ironBias,
         approachDispersion, overallDispersionAngle,
+        driverRightPct: missBias.driverRightPct ?? null,
+        driverLeftPct: missBias.driverLeftPct ?? null,
+        ironRightPct: missBias.ironRightPct ?? null,
+        ironLeftPct: missBias.ironLeftPct ?? null,
     };
 }
 
@@ -2478,4 +2484,37 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
     init();
+}
+
+
+// ── Miss Bias Helper (appended for NLG context) ──────────────────────────────
+// Compute percentage of shots missing right/left for extreme bias detection
+function computeMissBiasPercentages(clubStats) {
+    if (!clubStats || !clubStats.length) return {};
+    
+    const result = {};
+    
+    // Driver miss bias
+    const driver = clubStats.find(c => /driver/i.test(c.name));
+    if (driver) {
+        // Estimate right/left shots based on avgDev and shots count
+        // If avgDev > 0, bias is right; if < 0, bias is left
+        // Use a simple heuristic: shots with |dev| > 15 are "missed" in that direction
+        const rightShots = driver.avgDev > 0 ? Math.round(driver.shots * Math.min(1, driver.avgDev / 30)) : 0;
+        const leftShots = driver.avgDev < 0 ? Math.round(driver.shots * Math.min(1, Math.abs(driver.avgDev) / 30)) : 0;
+        result.driverRightPct = Math.round(rightShots / driver.shots * 100);
+        result.driverLeftPct = Math.round(leftShots / driver.shots * 100);
+    }
+    
+    // Iron miss bias
+    const irons = clubStats.filter(c => /\\d-iron|iron/i.test(c.name));
+    if (irons.length) {
+        const totalShots = irons.reduce((a, c) => a + c.shots, 0);
+        const rightShots = irons.reduce((a, c) => a + (c.avgDev > 0 ? Math.round(c.shots * Math.min(1, c.avgDev / 30)) : 0), 0);
+        const leftShots = irons.reduce((a, c) => a + (c.avgDev < 0 ? Math.round(c.shots * Math.min(1, Math.abs(c.avgDev) / 30)) : 0), 0);
+        result.ironRightPct = Math.round(rightShots / totalShots * 100);
+        result.ironLeftPct = Math.round(leftShots / totalShots * 100);
+    }
+    
+    return result;
 }
