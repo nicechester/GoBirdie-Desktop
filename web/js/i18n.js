@@ -346,7 +346,44 @@ const FLAGS = {
         <rect y="13.54" width="24" height="1.23" fill="white"/>
         <rect width="9.6" height="8.62" fill="#3C3B6E"/>
     </svg>`,
-    ko: `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAYAAABU1PscAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAlmVYSWZNTQAqAAAACAAEARoABQAAAAEAAAA+ARsABQAAAAEAAABGASgAAwAAAAEAAgAAh2kABAAAAAEAAABOAAAAAAAAAJAAAAABAAAAkAAAAAEABJKGAAcAAAASAAAAhKABAAMAAAABAAEAAKACAAQAAAABAAAAMKADAAQAAAABAAAAIAAAAABBU0NJSQAAAFNjcmVlbnNob3RKAKLFAAAACXBIWXMAABYlAAAWJQFJUiTwAAACqWlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp0aWZmPSJodHRwOi8vbnMuYWRvYmUuY29tL3RpZmYvMS4wLyIKICAgICAgICAgICAgeG1sbnM6ZXhpZj0iaHR0cDovL25zLmFkb2JlLmNvbS9leGlmLzEuMC8iPgogICAgICAgICA8dGlmZjpZUmVzb2x1dGlvbj4xNDQ8L3RpZmY6WVJlc29sdXRpb24+CiAgICAgICAgIDx0aWZmOlhSZXNvbHV0aW9uPjE0NDwvdGlmZjpYUmVzb2x1dGlvbj4KICAgICAgICAgPHRpZmY6UmVzb2x1dGlvblVuaXQ+MjwvdGlmZjpSZXNvbHV0aW9uVW5pdD4KICAgICAgICAgPGV4aWY6UGl4ZWxZRGltZW5zaW9uPjExNjI8L2V4aWY6UGl4ZWxZRGltZW5zaW9uPgogICAgICAgICA8ZXhpZjpVc2VyQ29tbWVudD5TY3JlZW5zaG90PC9leGlmOlVzZXJDb21tZW50PgogICAgICAgICA8ZXhpZjpQaXhlbFhEaW1lbnNpb24+MTU2ODwvZXhpZjpQaXhlbFhEaW1lbnNpb24+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgohegftAAAHYklEQVRYCdVYe0yU2RX/zYsBeUPXR32lgluUlYdbLCDSul1bwUdra4JmDTExsSrW9UG0MeL78YfiBigWHzGiq1GjkhRjXF9VN41GtCvrikSgbGXF5SUKjMAwzOk5twUhM9/MyG6a9SRf5vvOvefc8zv3nHvPGR0x4S0m/VtsuzLdYwBPnz7F/2uznj17hu7ubo986xGAW7duISoqCidPnoTFYvFI8UAmdXR04MGDB5g4cSLy8/M9UuEWQFNTE9LT0zF69Gjo9XrExsZCAH3fVF9fj8mTJ6O4uBgzZ85EZmYmbt++7X4ZSWItstvtlJaWRn5+fnTx4kUaO3YsJSQkUGFhIU2ZMoWqqqq0RD3m847S3LlzafPmzZSRkUEmk4kYBMXExKjHnSKJa03Kzc2VE4oOHjxI8+bNo+DgYLp06RKNHDmS4uLiqLm5WVPW04Guri5aunQp6XQ6KioqosTEROWo69ev0+HDh4lDicSRWqQJgLePjEYjLVmyhPbu3auAHDt2jGbNmqWAVFZWaukkW0srWR6W04ub/6AXf/+c2r74kqwNjZrzX169UTs7bNgwunbtGgUGBtKCBQuIc06tK6C0SKcAampqaMyYMcTJpLZTgKxevZq2b9+uFJ49e9apPstXZfR11nb68sPf0r3oyXR3XBzdjfgZ3XsvnkqnTKfKjEwFyJlwWVkZrV27lq5evUqHDh1S62RnZ9PixYuVI2/cuOFMjJwCOH/+PIWHh9O5c+fUb1JSknoXbV6zZo2DIrvVSt98kk//jEmikmGxdDfy53RvQgLdi0rse+4yiJJ3319gqo//TNb6Bgc9AsJsNtPOnTtp5cqVKh/OnDlD8fHxKkcOAmToiOks1dva2sBJix07duDAgQNYtmwZRo0ahStXrsDbu1eErF34esM2NBUVQ+/tA+h1vWNaL/ZX7fCNikRYfjZeQwf3TuNYB+808vLycPr0aezZswdhYWHYv38/fH19e+f1fdEEIJNsNhsaGhqwe/duHDlyBHfu3AHvTF951OQdQF3OX6H3HdSP7+7D3t6OwKnJCP/LbuhMpt7p7cyfOnVKHdnsfXA+aBovQi4B9Gh9/vw56urqMG7cuB6W+v2m+lv8Ky0d/u2tIO4IV6QDQZ8PL4k7PzIm50vrjHZOxEy8zf9ROXWFefJ3ePOXKf6JzmQkOtV/ycdEhLiYLwMXbj8ELaXLS7DRkz1JhusOiNqDQGoM/gq483UDc4pNHLocSL2s3P48OEeGS9Cxn6Sb/AhS/6tvBV/NA1CKNrB5jhIG9hUK/u90D8G531+im/ZeOGFdTXjI0spfm2vQEdFFWzNL2AMCXaQ94Th0Q44U2Sz2fGozYAzfu8pD/83PF7PNHKgCMgNwR8gJyAJVaYQWHReaNGZ8YX5x8gMScGn/tEwWlrB98ZrwTd8GzAAA582AZx7n/rFYp//JHTqDPDhUPGhLgWoQT8IG4I+wCX2PJgHsrNpAokfDh8Jm3y/OPzbOxQmrwEHwsBDSM8AIkcF4n5ZA3IDElDs8y7et9YiyN7Bse6PO+YRaDT4saE2DZ/aYYEZj0dMQErowMJHFA8cOgvPTRqN459VKo9Wc4hUm37EXMmFHi+7qemtVoT+IgEw8/0xQPIohAoKCsC1iTra+q6TOmkEkmKHAZ3sZQkR8bYKF/G6hIsL6rZjyGBffPiHJIdJW7duVRenw4AThksAXFhhxYoVMBgMOH78OPiK76fCy2RAwZ/iMfQdviWtbrzdV7KbYOAjNCcjAUOHBPYdAZft2LRpE7y8vLBr1y63jY2B6/DN/TTwR0VFBfbt26fY69evVx0Sl7nYtm0b5Feu9x4aHOSD5AlDcPNBHZoauFszsE/YOKck531nNwL9vVCwKhEf/eq1HpnPRSSmTZumGps5c+aAK2FER0erLk1KGy4wHdQ63YEnT55g48aNePToEbZs2aKeyMhIdcUvXLgQclP2pUkR7+DmJ6n4OG0CQtk4FVIdHEayK/JIiPG3t9GA3//yJ7ixNxXp08L7qkBnZyfKy8sxf/58LF++HNwjYPbs2Rg/fjxWrVqFkpKSfvN7P5xVeMLrKZ2PHj1KixYtIi7o6P79+xQaGkrTp08naUScUU19GxV+VkHL827R7zZdpVlZV2jRns8pt+ghfVX93JmI4mVlZak+4/Hjx6qk5h0gqUQDAgJUD6K1ntNyWjRyLUKpqakUFBREopQ9QykpKXTixAnJTuKd0TTmTQcuXLigdK5dt071BOx1amxsVA2NlNK1tbWaKjUBiASHCnFdovpfTmK1iPSu3HATl9TEIaap2NOB1tZWioiIoOTkZDp16pRag5OY+PBQDnv58qVLVS4BiOTly5eVUumWRLF4XzzG/0yQlRuZ70r8/w+VlpYSl+okLaXsurSuso6s56oflrXdApBJfPoohaJY2smWlhZhf68kQOTfCHGYv78/zZgxQ4Wxu0U8AiCezsnJoerqanf6vvO4hJT8G8InoUe6PGpoeo+sH+CL03vgB2inpklvPYD/APKWjTRYjl1MAAAAAElFTkSuQmCC" width="24" height="16" alt="한국어" style="border-radius:2px;box-shadow:0 0 1px rgba(0,0,0,0.3);object-fit:cover">`
+    ko: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 20" width="30" height="20" style="border-radius:2px;box-shadow:0 0 1px rgba(0,0,0,0.3)">
+      <rect width="30" height="20" fill="white"/>
+      <!-- Taegeuk (yin-yang) -->
+      <circle cx="15" cy="10" r="5" fill="#CD2E3A"/>
+      <path d="M15,5 a2.5,2.5 0 0,1 0,5 a2.5,2.5 0 0,0 0,5 a5,5 0 0,1 0,-10z" fill="#0047A0"/>
+      <circle cx="15" cy="7.5" r="1.25" fill="#CD2E3A"/>
+      <circle cx="15" cy="12.5" r="1.25" fill="#0047A0"/>
+      <!-- 건 (☰) top-left: 3 solid bars -->
+      <g transform="translate(4.5,3.5) rotate(-45)">
+        <rect x="-2.5" y="-2.2" width="5" height="1" fill="black"/>
+        <rect x="-2.5" y="-0.5" width="5" height="1" fill="black"/>
+        <rect x="-2.5" y="1.2" width="5" height="1" fill="black"/>
+      </g>
+      <!-- 곤 (☷) bottom-right: 3 broken bars -->
+      <g transform="translate(25.5,16.5) rotate(-45)">
+        <rect x="-2.5" y="-2.2" width="2" height="1" fill="black"/>
+        <rect x="0.5" y="-2.2" width="2" height="1" fill="black"/>
+        <rect x="-2.5" y="-0.5" width="2" height="1" fill="black"/>
+        <rect x="0.5" y="-0.5" width="2" height="1" fill="black"/>
+        <rect x="-2.5" y="1.2" width="2" height="1" fill="black"/>
+        <rect x="0.5" y="1.2" width="2" height="1" fill="black"/>
+      </g>
+      <!-- 감 (☵) top-right: broken, solid, broken -->
+      <g transform="translate(25.5,3.5) rotate(45)">
+        <rect x="-2.5" y="-2.2" width="2" height="1" fill="black"/>
+        <rect x="0.5" y="-2.2" width="2" height="1" fill="black"/>
+        <rect x="-2.5" y="-0.5" width="5" height="1" fill="black"/>
+        <rect x="-2.5" y="1.2" width="2" height="1" fill="black"/>
+        <rect x="0.5" y="1.2" width="2" height="1" fill="black"/>
+      </g>
+      <!-- 리 (☲) bottom-left: solid, broken, solid -->
+      <g transform="translate(4.5,16.5) rotate(45)">
+        <rect x="-2.5" y="-2.2" width="5" height="1" fill="black"/>
+        <rect x="-2.5" y="-0.5" width="2" height="1" fill="black"/>
+        <rect x="0.5" y="-0.5" width="2" height="1" fill="black"/>
+        <rect x="-2.5" y="1.2" width="5" height="1" fill="black"/>
+      </g>
+    </svg>`
 };
 
 export function initLangSelector(onLangChange) {
