@@ -2486,26 +2486,8 @@ async function init() {
     });
     applyStaticTranslations();
 
-    // Poll watch connection every 3 seconds
-    async function pollWatch() {
-        try {
-            const connected = await checkWatch();
-            const btn = document.getElementById('sync-btn');
-            if (connected) {
-                btn.disabled = false;
-                btn.classList.remove('opacity-40', 'cursor-not-allowed');
-                btn.title = '';
-            } else {
-                if (!state.syncing) {
-                    btn.disabled = true;
-                    btn.classList.add('opacity-40', 'cursor-not-allowed');
-                    btn.title = 'Connect your Garmin watch via USB';
-                }
-            }
-        } catch (_) {}
-    }
-    pollWatch();
-    setInterval(pollWatch, 3000);
+    // Watch connection polling removed — garmin_mtp probing triggers Android File Transfer.
+    // Sync button is always enabled; sync will show an error if watch is not connected.
 
     try {
         state.rounds = await getAllRounds();
