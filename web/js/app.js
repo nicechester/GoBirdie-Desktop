@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
+import { t, getLang, initLangSelector } from './i18n.js';
 
 const PAGE_SIZE = 10;
 
@@ -112,11 +113,11 @@ function renderRoundsList() {
     const moreBtn = `
         <button id="load-more-btn"
             class="w-full mt-2 py-2 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition">
-            Load 10 more...
+            ${t('rounds.loadmore')}
         </button>`;
 
     list.innerHTML = filtered.length === 0
-        ? '<p class="text-gray-400 text-sm text-center mt-8">No rounds found.</p>'
+        ? `<p class="text-gray-400 text-sm text-center mt-8">${state.rounds.length === 0 ? t('rounds.empty') : t('rounds.notfound')}</p>`
         : items + moreBtn;
 
     list.querySelectorAll('.round-item').forEach(el => {
@@ -171,14 +172,15 @@ function renderDetailTabs() {
 
     const sc = round.scorecard;
     const dt = new Date((round.start_ts + 631065600) * 1000);
-    const dateStr = dt.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
-    const timeStr = dt.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+    const locale = getLang() === 'ko' ? 'ko-KR' : 'en-US';
+    const dateStr = dt.toLocaleDateString(locale, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+    const timeStr = dt.toLocaleTimeString(locale, { hour:'2-digit', minute:'2-digit' });
 
     const tabs = [
-        { id: 'overview', label: 'Overview' },
-        { id: 'shotmap',  label: 'Shot Map' },
-        { id: 'stats',    label: 'Course Stats' },
-        { id: 'sg',       label: 'Shot Analysis' },
+        { id: 'overview', label: t('tab.overview') },
+        { id: 'shotmap',  label: t('tab.shotmap') },
+        { id: 'stats',    label: t('tab.stats') },
+        { id: 'sg',       label: t('tab.sg') },
     ];
 
     const tabBar = `
@@ -192,7 +194,7 @@ function renderDetailTabs() {
         <button id="ask-ai-btn"
             class="mr-4 mb-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-purple-300
                    text-purple-700 hover:bg-purple-50 transition flex items-center gap-1.5">
-            <span>✨</span> Ask AI
+            <span>✨</span> ${t('btn.askai')}
         </button>
     </div>`;
 
@@ -226,7 +228,7 @@ function renderDetailTabs() {
     document.getElementById('ask-ai-btn')?.addEventListener('click', async () => {
         const prompt = buildAiPrompt(round);
         await navigator.clipboard.writeText(prompt);
-        toast('Prompt copied! Paste it on gemini.google.com or chatgpt.com');
+        toast(t('toast.copied'));
     });
 
     // Post-render hooks
@@ -263,33 +265,33 @@ function buildHeader(round, sc, dateStr, timeStr) {
         <div class="mt-4 grid grid-cols-3 md:grid-cols-6 gap-3 text-center">
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-lg font-bold text-gray-800">${Math.round(round.duration_seconds / 60)}</div>
-                <div class="text-xs text-gray-500">Minutes</div>
+                <div class="text-xs text-gray-500">${t('stat.minutes')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-lg font-bold text-gray-800">${(round.distance_meters / 1000).toFixed(2)}</div>
-                <div class="text-xs text-gray-500">km walked</div>
+                <div class="text-xs text-gray-500">${t('stat.kmwalked')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-lg font-bold text-gray-800">${round.avg_heart_rate || '—'}</div>
-                <div class="text-xs text-gray-500">Avg HR</div>
+                <div class="text-xs text-gray-500">${t('stat.avghr')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-lg font-bold text-gray-800">${round.calories || '—'}</div>
-                <div class="text-xs text-gray-500">Calories</div>
+                <div class="text-xs text-gray-500">${t('stat.calories')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-lg font-bold text-gray-800">${alt || '—'}</div>
-                <div class="text-xs text-gray-500">Altitude</div>
+                <div class="text-xs text-gray-500">${t('stat.altitude')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-lg font-bold text-gray-800">${tempo || '—'}</div>
-                <div class="text-xs text-gray-500">Avg Tempo</div>
+                <div class="text-xs text-gray-500">${t('stat.avgtempo')}</div>
             </div>
         </div>
         ${round.total_ascent != null ? `
         <div class="mt-3 flex gap-4 text-xs text-gray-500 justify-center">
-            <span>Ascent: ${round.total_ascent} m</span>
-            <span>Descent: ${round.total_descent} m</span>
+            <span>${t('stat.ascent', {v: round.total_ascent})}</span>
+            <span>${t('stat.descent', {v: round.total_descent})}</span>
         </div>` : ''}
     </div>`;
 }
@@ -593,34 +595,34 @@ function buildScorecard(sc) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">Scorecard</h3>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('scorecard.title')}</h3>
         <div class="grid grid-cols-4 gap-4 mb-4 text-center">
             <div class="bg-blue-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-blue-700">${sc.total_putts}</div>
-                <div class="text-xs text-gray-500">Putts</div>
+                <div class="text-xs text-gray-500">${t('scorecard.putts')}</div>
             </div>
             <div class="bg-green-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-green-700">${sc.gir}/${sc.hole_scores.length}</div>
-                <div class="text-xs text-gray-500">GIR</div>
+                <div class="text-xs text-gray-500">${t('scorecard.gir')}</div>
             </div>
             <div class="bg-yellow-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-yellow-700">${sc.fairways_hit}</div>
-                <div class="text-xs text-gray-500">Fairways Hit</div>
+                <div class="text-xs text-gray-500">${t('scorecard.fairways')}</div>
             </div>
             <div class="bg-purple-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-purple-700">${sc.hole_scores.length}</div>
-                <div class="text-xs text-gray-500">Holes</div>
+                <div class="text-xs text-gray-500">${t('scorecard.holes')}</div>
             </div>
         </div>
         <div class="overflow-x-auto">
             <table class="hole-table w-full text-sm">
                 <thead>
-                    <tr><th>Hole</th><th>Par</th><th>Hdcp</th><th>Yds</th><th>Score</th><th>Putts</th><th>FW</th><th>Shots</th></tr>
+                    <tr><th>${t('scorecard.hole')}</th><th>${t('scorecard.par')}</th><th>${t('scorecard.hdcp')}</th><th>${t('scorecard.yds')}</th><th>${t('scorecard.score')}</th><th>${t('scorecard.putts')}</th><th>${t('scorecard.fw')}</th><th>${t('scorecard.shots')}</th></tr>
                 </thead>
                 <tbody>${rows}</tbody>
                 <tfoot>
                     <tr class="font-bold bg-gray-50">
-                        <td>Total</td><td>${scoredPar}</td><td></td><td></td>
+                        <td>${t('scorecard.total')}</td><td>${scoredPar}</td><td></td><td></td>
                         <td>${sc.total_score} (${overParStr(sc.total_score - scoredPar)})</td>
                         <td>${sc.total_putts}</td><td></td><td></td>
                     </tr>
@@ -640,21 +642,21 @@ function buildHealth(round) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">Health During Round</h3>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('health.title')}</h3>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-center">
             <div class="bg-red-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-red-600">${round.avg_heart_rate || '—'} / ${round.max_heart_rate || '—'}</div>
-                <div class="text-xs text-gray-500">Avg / Max HR (bpm)</div>
+                <div class="text-xs text-gray-500">${t('health.avgmaxhr')}</div>
             </div>
             ${bbStart != null ? `
             <div class="bg-green-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-green-600">${bbStart}% → ${bbEnd}%</div>
-                <div class="text-xs text-gray-500">Body Battery (−${bbStart - bbEnd}%)</div>
+                <div class="text-xs text-gray-500">${t('health.bodybattery', {drain: bbStart - bbEnd})}</div>
             </div>` : '<div></div>'}
             ${avgStress != null ? `
             <div class="bg-orange-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-orange-600">${avgStress} / ${peakStress}</div>
-                <div class="text-xs text-gray-500">Avg / Peak Stress</div>
+                <div class="text-xs text-gray-500">${t('health.avgpeakstress')}</div>
             </div>` : '<div></div>'}
         </div>
     </div>`;
@@ -682,7 +684,7 @@ function buildHrZones(round) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">HR Zones</h3>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('hrzones.title')}</h3>
         <div class="space-y-2">
         ${counts.map(z => {
             const pct  = (z.count / total * 100).toFixed(1);
@@ -718,11 +720,11 @@ function buildShotMap(round) {
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <div class="flex items-center justify-between mb-3">
-            <h3 class="text-lg font-semibold text-gray-700">Shot Map</h3>
+            <h3 class="text-lg font-semibold text-gray-700">${t('shotmap.title')}</h3>
             <div class="flex items-center gap-2">
-                <span class="text-xs text-gray-400">Hole:</span>
+                <span class="text-xs text-gray-400">${t('shotmap.hole')}</span>
                 <button class="hole-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border border-blue-600"
-                    data-hole="all">All</button>
+                    data-hole="all">${t('shotmap.all')}</button>
                 ${holeButtons}
             </div>
         </div>
@@ -733,13 +735,13 @@ function buildShotMap(round) {
             <div id="shot-legend" class="flex flex-wrap gap-3 text-xs text-gray-500"></div>
             <button id="trail-toggle" class="px-3 py-1 text-xs rounded-full border border-gray-300
                 hover:bg-gray-50 transition flex items-center gap-1">
-                <span id="trail-icon">👣</span> Trail
+                <span id="trail-icon">👣</span> ${t('shotmap.trail')}
             </button>
         </div>
     </div>
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-1">Round Timeline</h3>
-        <p class="text-xs text-gray-400 mb-4">Select a hole above to zoom in. HR, altitude and stress over time.</p>
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('shotmap.timeline.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('shotmap.timeline.desc')}</p>
         <div class="relative" style="height:240px">
             <canvas id="timeline-chart"></canvas>
         </div>
@@ -825,7 +827,7 @@ function renderShotMap(round) {
 
     const sc = round.scorecard;
     if (!sc?.hole_scores?.length) {
-        mapEl.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">No shot data available.</p>';
+        mapEl.innerHTML = `<p class="text-gray-400 text-sm text-center py-8">${t('shotmap.nodata')}</p>`;
         return;
     }
 
@@ -1190,7 +1192,7 @@ function buildCourseStats(round) {
     const sc = round.scorecard;
     if (!sc?.hole_scores?.length) {
         return `<div class="bg-white rounded-xl shadow-sm border p-6">
-            <p class="text-gray-400 text-sm">No scorecard data available.</p></div>`;
+            <p class="text-gray-400 text-sm">${t('stats.nodata')}</p></div>`;
     }
 
     // Build enriched shot list with distance, bearing, deviation from hole direction
@@ -1235,9 +1237,9 @@ function buildCourseStats(round) {
 
     return `
     <div class="space-y-6">
-        ${buildStatSection('Tee Shots', teeShots, true)}
-        ${buildStatSection('Approach Shots', approachShots, false)}
-        ${buildStatSection('Wedges', wedgeShots, false)}
+        ${buildStatSection(t('stats.teeshots'), teeShots, true)}
+        ${buildStatSection(t('stats.approach'), approachShots, false)}
+        ${buildStatSection(t('stats.wedges'), wedgeShots, false)}
         ${buildPuttSection(putts, sc)}
         ${buildClubSummary(enriched)}
     </div>`;
@@ -1287,15 +1289,15 @@ function buildStatSection(title, shots, isTee) {
         <div class="grid grid-cols-3 gap-4 mb-4 text-center">
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-gray-800">${Math.round(avgDist)}</div>
-                <div class="text-xs text-gray-500">Avg (yds)</div>
+                <div class="text-xs text-gray-500">${t('stats.avg')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-gray-800">${Math.round(maxDist)}</div>
-                <div class="text-xs text-gray-500">Max (yds)</div>
+                <div class="text-xs text-gray-500">${t('stats.max')}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-green-600">${Math.round(straight / shots.length * 100)}%</div>
-                <div class="text-xs text-gray-500">Straight</div>
+                <div class="text-xs text-gray-500">${t('stats.straight')}</div>
             </div>
         </div>
         <div class="space-y-1.5 mb-4">
@@ -1306,11 +1308,11 @@ function buildStatSection(title, shots, isTee) {
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead><tr class="text-xs text-gray-400 border-b">
-                    <th class="text-left py-1">Shot</th>
-                    <th class="text-left py-1">Club</th>
-                    <th class="text-left py-1">Dist</th>
-                    <th class="text-left py-1">Direction</th>
-                    <th class="text-left py-1">HR</th>
+                    <th class="text-left py-1">${t('stats.shot')}</th>
+                    <th class="text-left py-1">${t('stats.club')}</th>
+                    <th class="text-left py-1">${t('stats.dist')}</th>
+                    <th class="text-left py-1">${t('stats.direction')}</th>
+                    <th class="text-left py-1">${t('stats.hr')}</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
             </table>
@@ -1328,25 +1330,25 @@ function buildPuttSection(putts, sc) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">Putting
-            <span class="text-sm font-normal text-gray-400 ml-2">${totalPutts} total</span>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('stats.putting.title')}
+            <span class="text-sm font-normal text-gray-400 ml-2">${totalPutts} ${t('stats.putting.total')}</span>
         </h3>
         <div class="grid grid-cols-4 gap-4 text-center">
             <div class="bg-gray-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-gray-800">${(totalPutts / holesPlayed).toFixed(1)}</div>
-                <div class="text-xs text-gray-500">Per hole</div>
+                <div class="text-xs text-gray-500">${t('stats.putting.perhole')}</div>
             </div>
             <div class="bg-green-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-green-600">${onePutts}</div>
-                <div class="text-xs text-gray-500">1-putts</div>
+                <div class="text-xs text-gray-500">${t('stats.putting.oneputts')}</div>
             </div>
             <div class="bg-blue-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-blue-600">${totalPutts - onePutts - threePutts}</div>
-                <div class="text-xs text-gray-500">2-putts</div>
+                <div class="text-xs text-gray-500">${t('stats.putting.twoputts')}</div>
             </div>
             <div class="bg-red-50 rounded-lg p-3">
                 <div class="text-xl font-bold text-red-600">${threePutts}</div>
-                <div class="text-xs text-gray-500">3-putts</div>
+                <div class="text-xs text-gray-500">${t('stats.putting.threeputts')}</div>
             </div>
         </div>
     </div>`;
@@ -1394,14 +1396,14 @@ function buildClubSummary(enriched) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">Club Summary</h3>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('stats.clubsummary')}</h3>
         <table class="w-full text-sm">
             <thead><tr class="text-xs text-gray-400 border-b">
-                <th class="text-left py-1">Club</th>
-                <th class="text-left py-1">Shots</th>
-                <th class="text-left py-1">Avg Distance</th>
+                <th class="text-left py-1">${t('stats.club')}</th>
+                <th class="text-left py-1">${t('scorecard.shots')}</th>
+                <th class="text-left py-1">${t('stats.avgdist')}</th>
                 <th class="text-left py-1">Max</th>
-                <th class="text-left py-1">Straight%</th>
+                <th class="text-left py-1">${t('stats.straightpct')}</th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table>
@@ -1575,7 +1577,7 @@ function sgBadge(val) {
 function buildStrokesGainedTab(round) {
     const sg = computeStrokesGained(round);
     if (!sg) return `<div class="bg-white rounded-xl shadow-sm border p-6">
-        <p class="text-gray-400 text-sm">No scorecard data for Strokes Gained analysis.</p></div>`;
+        <p class="text-gray-400 text-sm">${t('sg.nodata')}</p></div>`;
 
     // Build club stats for NLG context (reuse buildClubAnalysis logic inline)
     const _clubStats = (() => {
@@ -1615,8 +1617,8 @@ function buildStrokesGainedTab(round) {
     const insightsCard = buildInsightsCard(_nlgCtx);
 
     const catLabels = {
-        off_tee: 'Off the Tee', approach: 'Approach',
-        short_game: 'Short Game', putting: 'Putting'
+        off_tee: t('sg.offtee'), approach: t('sg.approach'),
+        short_game: t('sg.shortgame'), putting: t('sg.putting')
     };
     const catIcons = {
         off_tee: '🏌️', approach: '🎯', short_game: '⛳', putting: '🏁'
@@ -1628,7 +1630,7 @@ function buildStrokesGainedTab(round) {
             <div class="text-2xl font-bold" style="color:${sgColor(sg.total)}">
                 ${sg.total >= 0 ? '+' : ''}${sg.total.toFixed(1)}
             </div>
-            <div class="text-xs text-gray-500 mt-1">Total SG</div>
+            <div class="text-xs text-gray-500 mt-1">${t('sg.total')}</div>
         </div>`;
 
     const catCards = Object.entries(catLabels).map(([key, label]) => {
@@ -1727,22 +1729,22 @@ function buildStrokesGainedTab(round) {
     return `
     ${insightsCard}
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-1">Strokes Gained</h3>
-        <p class="text-xs text-gray-400 mb-4">Based on Mark Broadie's Every Shot Counts · single-digit handicap baseline</p>
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('sg.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('sg.desc')}</p>
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             ${totalCard}
             ${catCards}
         </div>
         <div class="space-y-2 mb-6">${barChart}</div>
         <div class="grid grid-cols-2 gap-6 mb-6">
-            ${shotListHtml(best3, '🏆 Best Shots')}
-            ${shotListHtml(worst3, '💀 Worst Shots')}
+            ${shotListHtml(best3, t('sg.bestshots'))}
+            ${shotListHtml(worst3, t('sg.worstshots'))}
         </div>
     </div>
     ${clubAnalysis}
     ${dispersion}
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">Per-Hole Breakdown</h3>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('sg.perhole')}</h3>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead><tr class="text-xs text-gray-400 border-b">
@@ -1757,16 +1759,16 @@ function buildStrokesGainedTab(round) {
         </div>
     </div>
     <div class="bg-gray-50 rounded-xl border border-gray-200 p-6 text-sm text-gray-500 leading-relaxed">
-        <h4 class="font-semibold text-gray-600 mb-2">How Strokes Gained Works</h4>
-        <p class="mb-2">Strokes Gained, developed by Mark Broadie in <i>Every Shot Counts</i>, measures each shot's value by comparing your result to what a benchmark golfer (here, a single-digit handicap) would expect from the same position.</p>
-        <p class="mb-2"><b>SG = Expected strokes before − 1 − Expected strokes after.</b> A positive value means you gained strokes (did better than baseline); negative means you lost strokes.</p>
+        <h4 class="font-semibold text-gray-600 mb-2">${t('sg.howworks.title')}</h4>
+        <p class="mb-2">${t('sg.howworks.p1')}</p>
+        <p class="mb-2">${t('sg.howworks.p2')}</p>
         <div class="grid grid-cols-2 gap-x-6 gap-y-1 mt-3 text-xs">
-            <div><span class="font-medium text-gray-600">SG: Off the Tee</span> — Tee shots on par 4s and 5s</div>
-            <div><span class="font-medium text-gray-600">SG: Approach</span> — Shots into the green from 50+ yards</div>
-            <div><span class="font-medium text-gray-600">SG: Short Game</span> — Non-putt shots within 50 yards</div>
-            <div><span class="font-medium text-gray-600">SG: Putting</span> — All putts on the green</div>
+            <div>${t('sg.howworks.offtee')}</div>
+            <div>${t('sg.howworks.approach')}</div>
+            <div>${t('sg.howworks.shortgame')}</div>
+            <div>${t('sg.howworks.putting')}</div>
         </div>
-        <p class="mt-3 text-xs text-gray-400">Lie detection is approximate — fairway/rough is inferred from the fairway-hit flag on tee shots. Baseline data is interpolated from Broadie's published single-digit handicap tables.</p>
+        <p class="mt-3 text-xs text-gray-400">${t('sg.howworks.note')}</p>
     </div>`;
 }
 
@@ -1871,8 +1873,8 @@ function buildClubAnalysis(round, sg) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-1">Club Analysis</h3>
-        <p class="text-xs text-gray-400 mb-4">Mis-shot tendency and consistency per club (min 2 shots)</p>
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('clubanalysis.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('clubanalysis.desc')}</p>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead><tr class="text-xs text-gray-400 border-b">
@@ -2036,8 +2038,8 @@ function buildDispersionHeatmaps(round, sg) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-1">Shot Dispersion</h3>
-        <p class="text-xs text-gray-400 mb-4">Where your shots land relative to target — count and avg SG per cell. Grouped by distance to green.</p>
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('dispersion.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('dispersion.desc')}</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             ${heatmaps.join('')}
         </div>
@@ -2418,10 +2420,10 @@ async function handleSync() {
 
         renderRoundsList();
         if (newSummaries.length > 0) loadDetail(newSummaries[0].id);
-        toast(`Synced ${newSummaries.length} round(s)`);
+        toast(t('toast.synced', {count: newSummaries.length}));
         updateStats();
     } catch (e) {
-        toast(`Sync failed: ${e}`, true);
+        toast(t('toast.syncfail', {err: e}), true);
     } finally {
         state.syncing = false;
         btn.disabled = false;
@@ -2444,10 +2446,10 @@ async function handleLoadMore() {
         state.syncOffset += PAGE_SIZE;
 
         renderRoundsList();
-        toast(`Loaded ${newSummaries.length} more round(s)`);
+        toast(t('toast.loaded', {count: newSummaries.length}));
         updateStats();
     } catch (e) {
-        toast(`Load failed: ${e}`, true);
+        toast(t('toast.loadfail', {err: e}), true);
     } finally {
         state.syncing = false;
     }
@@ -2457,7 +2459,7 @@ async function updateStats() {
     try {
         const stats = await getStoreStats();
         document.getElementById('store-stats').textContent =
-            `${stats.round_count} round${stats.round_count !== 1 ? 's' : ''} stored`;
+            t('rounds.stored', {count: stats.round_count, s: stats.round_count !== 1 ? 's' : ''});
     } catch (_) {}
 }
 
@@ -2470,6 +2472,15 @@ async function init() {
         renderRoundsList();
     });
 
+    // Language selector
+    initLangSelector(() => {
+        applyStaticTranslations();
+        renderRoundsList();
+        if (state.activeRound) renderDetailTabs();
+        updateStats();
+    });
+    applyStaticTranslations();
+
     try {
         state.rounds = await getAllRounds();
         renderRoundsList();
@@ -2478,6 +2489,12 @@ async function init() {
     } catch (e) {
         console.error('Init error:', e);
     }
+}
+
+function applyStaticTranslations() {
+    document.getElementById('app-title').textContent = t('app.title');
+    document.getElementById('sync-label').textContent = state.syncing ? t('sync.syncing') : t('sync.label');
+    document.getElementById('search-input').placeholder = t('search.placeholder');
 }
 
 if (document.readyState === 'loading') {
