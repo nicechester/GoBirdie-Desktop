@@ -48,7 +48,7 @@ pub fn download_rounds(dest_dir: &Path, count: usize, offset: usize) -> Result<V
     Ok(entries)
 }
 
-fn find_binary() -> Result<PathBuf, String> {
+pub fn find_binary() -> Result<PathBuf, String> {
     let native_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/native");
     let candidates = [
         // bundled: next to the app executable (with arch suffix)

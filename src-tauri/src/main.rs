@@ -166,15 +166,21 @@ fn get_store_stats(state: State<'_, AppState>) -> serde_json::Value {
 }
 
 #[tauri::command]
-fn check_watch() -> bool {
-    // Use ioreg to detect a Garmin USB device without claiming the interface
-    let output = std::process::Command::new("ioreg")
-        .args(["-p", "IOUSB", "-l", "-w", "0"])
+fn check_watch(state: State<'_, AppState>) -> bool {
+    let binary = match mtp::find_binary() {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    // Run with count=0 — binary exits quickly; check stderr for "No MTP device"
+    let output = std::process::Command::new(&binary)
+        .arg(state.fit_dir.to_str().unwrap_or("/tmp"))
+        .arg("0")
+        .arg("0")
         .output();
     match output {
         Ok(o) => {
-            let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
-            s.contains("garmin")
+            let stderr = String::from_utf8_lossy(&o.stderr).to_lowercase();
+            !stderr.contains("no mtp device") && !stderr.contains("failed to open device")
         }
         Err(_) => false,
     }
