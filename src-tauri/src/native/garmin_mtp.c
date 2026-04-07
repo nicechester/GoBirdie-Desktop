@@ -61,8 +61,11 @@ static uint32_t find_folder_id(LIBMTP_mtpdevice_t *dev,
 
 int main(int argc, char *argv[]) {
     const char *dest_dir = argc > 1 ? argv[1] : "/tmp";
-    int count  = argc > 2 ? atoi(argv[2]) : 1;
-    int offset = argc > 3 ? atoi(argv[3]) : 0;
+    char *end;
+    int count  = argc > 2 ? (int)strtol(argv[2], &end, 10) : 1;
+    if (argc > 2 && (end == argv[2] || *end != '\0')) count = 1;
+    int offset = argc > 3 ? (int)strtol(argv[3], &end, 10) : 0;
+    if (argc > 3 && (end == argv[3] || *end != '\0')) offset = 0;
     if (count < 1 || count > MAX_ROUNDS) count = 1;
 
     // Redirect libmtp noise to stderr
@@ -101,12 +104,12 @@ int main(int argc, char *argv[]) {
         LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "Clubs", 0);
 
     // Fall back to env vars or hardcoded defaults
-    if (!folder_scorcrds) folder_scorcrds = getenv("GARMIN_FOLDER_SCORCRDS")
-        ? (uint32_t)atoi(getenv("GARMIN_FOLDER_SCORCRDS")) : 16777263;
-    if (!folder_activity) folder_activity = getenv("GARMIN_FOLDER_ACTIVITY")
-        ? (uint32_t)atoi(getenv("GARMIN_FOLDER_ACTIVITY")) : 16777249;
-    if (!folder_clubs)    folder_clubs    = getenv("GARMIN_FOLDER_CLUBS")
-        ? (uint32_t)atoi(getenv("GARMIN_FOLDER_CLUBS"))    : 16777264;
+    if (!folder_scorcrds) { const char *e = getenv("GARMIN_FOLDER_SCORCRDS");
+        folder_scorcrds = e ? (uint32_t)strtoul(e, NULL, 10) : 16777263; }
+    if (!folder_activity) { const char *e = getenv("GARMIN_FOLDER_ACTIVITY");
+        folder_activity = e ? (uint32_t)strtoul(e, NULL, 10) : 16777249; }
+    if (!folder_clubs)    { const char *e = getenv("GARMIN_FOLDER_CLUBS");
+        folder_clubs    = e ? (uint32_t)strtoul(e, NULL, 10) : 16777264; }
 
     fprintf(stderr, "[folders] SCORCRDS=%u Activity=%u Clubs=%u\n",
             folder_scorcrds, folder_activity, folder_clubs);
@@ -121,6 +124,7 @@ int main(int argc, char *argv[]) {
             sc_files[sc_count].filesize = f->filesize;
             sc_files[sc_count].mtime    = f->modificationdate;
             strncpy(sc_files[sc_count].filename, f->filename, 63);
+            sc_files[sc_count].filename[63] = '\0';
             sc_count++;
         }
         f = f->next;
@@ -154,6 +158,7 @@ int main(int argc, char *argv[]) {
             act_files[act_count].filesize = a->filesize;
             act_files[act_count].mtime    = a->modificationdate;
             strncpy(act_files[act_count].filename, a->filename, 63);
+            act_files[act_count].filename[63] = '\0';
             act_count++;
         }
         a = a->next;
