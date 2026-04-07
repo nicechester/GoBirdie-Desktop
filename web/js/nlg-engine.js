@@ -3,18 +3,27 @@
 // ranks by severity + tier, and returns top N insights.
 
 import { NLG_TEMPLATES } from './nlg-templates.js';
+import { getLang, t } from './i18n.js';
 
 const SEVERITY_ORDER = { critical: 0, warning: 1, positive: 2, info: 3 };
 
 // Evaluate all templates against context, return ranked insights
 export function generateInsights(ctx, maxInsights = 6) {
     if (!ctx) return [];
+    const lang = getLang();
 
     const fired = [];
     for (const tpl of NLG_TEMPLATES) {
         try {
             if (tpl.condition(ctx)) {
-                const msg = tpl.messages[Math.floor(Math.random() * tpl.messages.length)](ctx);
+                // Support both old array format and new {en:[],ko:[]} format
+                let msgArr;
+                if (Array.isArray(tpl.messages)) {
+                    msgArr = tpl.messages;
+                } else {
+                    msgArr = tpl.messages[lang] ?? tpl.messages.en;
+                }
+                const msg = msgArr[Math.floor(Math.random() * msgArr.length)](ctx);
                 fired.push({ code: tpl.code, severity: tpl.severity, tier: tpl.tier, message: msg });
             }
         } catch (_) { /* skip if data missing */ }
@@ -49,8 +58,8 @@ export function buildInsightsCard(ctx) {
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-1">Key Insights</h3>
-        <p class="text-xs text-gray-400 mb-4">Rule-based analysis of your round</p>
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('insights.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('insights.desc')}</p>
         ${items}
     </div>`;
 }

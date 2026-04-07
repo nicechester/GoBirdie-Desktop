@@ -1,6 +1,8 @@
-# Garmin Analyzer
+# Garmin Golf Analyzer
 
 A desktop application for analyzing Garmin golf round data. Built with Tauri 2, Rust, and vanilla JavaScript.
+
+🇰🇷 [한국어 README](README.ko.md)
 
 ## Overview
 
@@ -81,7 +83,11 @@ tauri/
 ├── web/                    Frontend (vanilla JS + Tailwind)
 │   ├── index.html
 │   ├── css/main.css
-│   └── js/app.js
+│   └── js/
+│       ├── app.js              Main UI rendering and event handling
+│       ├── i18n.js             Internationalization (EN/KO translations, language selector)
+│       ├── nlg-templates.js    Bilingual NLG insight templates (~35 rules)
+│       └── nlg-engine.js       Rule-based insight engine
 ├── package.json
 └── vite.config.js
 ```
@@ -247,3 +253,11 @@ Android File Transfer must not be running when syncing. The app kills it automat
 | `@tauri-apps/api` | `invoke()` for Rust commands |
 | `vite` | Dev server and bundler |
 | Tailwind CSS (CDN) | Styling |
+
+## Internationalization (i18n)
+
+The app supports English and Korean. A flag-based language toggle in the header switches all UI strings, NLG insights, and date formatting between locales. Language preference is persisted in `localStorage` under the `garmin-golf-lang` key.
+
+- `i18n.js` — `t(key, params)` translation function, EN/KO string dictionaries (~100+ keys), language selector with flag icons
+- `nlg-templates.js` — All ~35 insight templates have bilingual `messages: { en: [...], ko: [...] }` format
+- `nlg-engine.js` — Picks the correct language branch at render time, with English fallback
