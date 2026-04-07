@@ -2178,47 +2178,47 @@ function buildAiPrompt(round) {
     const overPar = sc ? sc.total_score - scoredPar : 0;
 
     const L = [];
-    L.push('Please analyze my golf round comprehensively and provide insights on performance, patterns, and areas for improvement.\n');
+    L.push(t('ai.intro') + '\n');
 
     // Round summary
-    L.push('## Round Summary');
-    L.push(`Date: ${dateStr}`);
-    L.push(`Course: ${sc?.course_name ?? 'Unknown'} (${sc?.tee_color ?? ''} tees, Rating ${sc?.course_rating ?? ''}, Slope ${sc?.slope ?? ''})`);
-    L.push(`Score: ${sc?.total_score ?? '—'} (${overPar >= 0 ? '+' : ''}${overPar}) over par ${scoredPar}`);
-    L.push(`Holes: ${sc?.hole_scores.length ?? '—'}, Duration: ${Math.round(round.duration_seconds / 60)} min, Distance: ${(round.distance_meters / 1000).toFixed(2)} km`);
-    L.push(`Calories: ${round.calories ?? '—'}, Avg HR: ${round.avg_heart_rate ?? '—'} bpm, Max HR: ${round.max_heart_rate ?? '—'} bpm`);
+    L.push(t('ai.roundsummary'));
+    L.push(`${t('ai.date')}: ${dateStr}`);
+    L.push(`${t('ai.course')}: ${sc?.course_name ?? 'Unknown'} (${sc?.tee_color ?? ''} tees, Rating ${sc?.course_rating ?? ''}, Slope ${sc?.slope ?? ''})`);
+    L.push(`${t('ai.score')}: ${sc?.total_score ?? '—'} (${overPar >= 0 ? '+' : ''}${overPar}) over par ${scoredPar}`);
+    L.push(`${t('ai.holes')}: ${sc?.hole_scores.length ?? '—'}, ${t('ai.duration')}: ${Math.round(round.duration_seconds / 60)} min, ${t('ai.distance')}: ${(round.distance_meters / 1000).toFixed(2)} km`);
+    L.push(`${t('ai.calories')}: ${round.calories ?? '—'}, ${t('ai.avghr')}: ${round.avg_heart_rate ?? '—'} bpm, ${t('ai.maxhr')}: ${round.max_heart_rate ?? '—'} bpm`);
     if (round.min_altitude_meters != null)
-        L.push(`Altitude: ${Math.round(round.min_altitude_meters)}–${Math.round(round.max_altitude_meters)} m`);
+        L.push(`${t('ai.altitude')}: ${Math.round(round.min_altitude_meters)}–${Math.round(round.max_altitude_meters)} m`);
     if (round.avg_swing_tempo != null)
-        L.push(`Avg swing tempo: ${round.avg_swing_tempo.toFixed(1)}:1`);
+        L.push(`${t('ai.avgtempo')}: ${round.avg_swing_tempo.toFixed(1)}:1`);
 
     // Scorecard
     if (sc) {
-        L.push('\n## Hole-by-Hole Scorecard');
-        L.push('Hole | Par | Score | +/- | Putts | FW | Shots | Clubs');
+        L.push('\n' + t('ai.scorecard'));
+        L.push(`${t('ai.sc.hole')} | ${t('ai.sc.par')} | ${t('ai.sc.score')} | ${t('ai.sc.diff')} | ${t('ai.sc.putts')} | ${t('ai.sc.fw')} | ${t('ai.sc.shots')} | ${t('ai.sc.clubs')}`);
         L.push('-----|-----|-------|-----|-------|----|-------|------');
         sc.hole_scores.forEach(hs => {
             const def = parMap[hs.hole_number];
             const par = def?.par ?? 0;
             const diff = hs.score - par;
             const diffStr = diff === 0 ? 'E' : (diff > 0 ? `+${diff}` : `${diff}`);
-            const fw = par === 3 ? 'n/a' : (hs.fairway_hit ? 'Y' : 'N');
+            const fw = par === 3 ? t('ai.sc.na') : (hs.fairway_hit ? 'Y' : 'N');
             const clubs = [...new Set(hs.shots.filter(s => s.club_name).map(s => s.club_name))].join(', ') || '—';
             L.push(`H${hs.hole_number} | ${par} | ${hs.score} | ${diffStr} | ${hs.putts} | ${fw} | ${hs.shots.length} | ${clubs}`);
         });
-        L.push(`Total | ${scoredPar} | ${sc.total_score} | ${overPar >= 0 ? '+' : ''}${overPar} | ${sc.total_putts} | ${sc.fairways_hit} FW | |`);
+        L.push(`${t('ai.sc.total')} | ${scoredPar} | ${sc.total_score} | ${overPar >= 0 ? '+' : ''}${overPar} | ${sc.total_putts} | ${sc.fairways_hit} FW | |`);
     }
 
     // Shot details
     if (sc) {
-        L.push('\n## Shot Details');
+        L.push('\n' + t('ai.shotdetails'));
         sc.hole_scores.forEach(hs => {
             const def = parMap[hs.hole_number];
             const distYds = def?.distance_cm ? Math.round(def.distance_cm / 91.44) : '?';
-            L.push(`\nHole ${hs.hole_number} (Par ${def?.par ?? '?'}, ${distYds} yds):`);
+            L.push(`\n${t('ai.sc.hole')} ${hs.hole_number} (Par ${def?.par ?? '?'}, ${distYds} yds):`);
             hs.shots.forEach((shot, i) => {
                 const parts = [
-                    `  Shot ${i+1}: ${shot.club_name ?? shot.club_category ?? 'Unknown'}`,
+                    `  ${t('ai.shot')} ${i+1}: ${shot.club_name ?? shot.club_category ?? 'Unknown'}`,
                     shot.distance_meters ? `${Math.round(shot.distance_meters * 1.09361)}yds` : null,
                     shot.heart_rate      ? `HR ${shot.heart_rate}bpm` : null,
                     shot.altitude_meters ? `Alt ${Math.round(shot.altitude_meters)}m` : null,
@@ -2235,7 +2235,7 @@ function buildAiPrompt(round) {
         const _ctx = buildAnalyticsContext(round, _sg, null);
         const insightsText = buildInsightsText(_ctx);
         if (insightsText) {
-            L.push('\n## Pre-computed Insights');
+            L.push('\n' + t('ai.insights'));
             L.push(insightsText);
         }
     }
@@ -2243,15 +2243,15 @@ function buildAiPrompt(round) {
     // Strokes Gained summary
     const sg = computeStrokesGained(round);
     if (sg) {
-        L.push('\n## Strokes Gained (single-digit handicap baseline)');
-        L.push(`Total: ${sg.total >= 0 ? '+' : ''}${sg.total.toFixed(2)}`);
-        const catNames = { off_tee: 'Off the Tee', approach: 'Approach', short_game: 'Short Game', putting: 'Putting' };
+        L.push('\n' + t('ai.sg'));
+        L.push(`${t('ai.sg.total')}: ${sg.total >= 0 ? '+' : ''}${sg.total.toFixed(2)}`);
+        const catNames = { off_tee: t('ai.sg.cats.off_tee'), approach: t('ai.sg.cats.approach'), short_game: t('ai.sg.cats.short_game'), putting: t('ai.sg.cats.putting') };
         Object.entries(catNames).forEach(([k, v]) => {
             const val = sg.categories[k];
             L.push(`${v}: ${val >= 0 ? '+' : ''}${val.toFixed(2)} (${sg.catCounts[k]} shots)`);
         });
-        L.push('\nPer-shot SG:');
-        L.push('Hole | Shot | Club | Dist | SG');
+        L.push(t('ai.sg.pershot'));
+        L.push(`${t('ai.sg.hole')} | ${t('ai.shot')} | ${t('ai.sc.clubs')} | ${t('ai.sg.dist')} | SG`);
         L.push('-----|------|------|------|---');
         sg.shots.forEach(s => {
             L.push(`H${s.hole} | S${s.shotNum} | ${s.club} | ${s.distBefore}yds | ${s.sg >= 0 ? '+' : ''}${s.sg.toFixed(2)}`);
@@ -2282,8 +2282,8 @@ function buildAiPrompt(round) {
 
             const clubEntries = Object.entries(byClub).filter(([, arr]) => arr.length >= 2);
             if (clubEntries.length) {
-                L.push('\n## Club Analysis (Tendency & Consistency)');
-                L.push('Club | Shots | Avg Dist | Std Dev | Avg Deviation | Left% | Straight% | Right% | Avg SG');
+                L.push('\n' + t('ai.clubanalysis'));
+                L.push(`${t('ai.sc.clubs')} | ${t('ai.sc.shots')} | ${t('ai.club.avgdist')} | ${t('ai.club.stddev')} | ${t('ai.club.avgdev')} | ${t('ai.club.left')} | ${t('ai.club.straight')} | ${t('ai.club.right')} | ${t('ai.club.avgsg')}`);
                 L.push('-----|-------|---------|---------|---------------|-------|-----------|--------|------');
                 clubEntries.sort((a, b) => {
                     const avgA = a[1].reduce((s, x) => s + x.distYds, 0) / a[1].length;
@@ -2335,7 +2335,7 @@ function buildAiPrompt(round) {
             })).filter(b => b.shots.length >= 2);
 
             if (dispBuckets.length) {
-                L.push('\n## Shot Dispersion Patterns');
+                L.push('\n' + t('ai.dispersion'));
                 dispBuckets.forEach(b => {
                     const avgSg = (b.shots.reduce((a, s) => a + s.sg, 0) / b.shots.length);
                     const avgDev = Math.round(b.shots.reduce((a, s) => a + s.dev, 0) / b.shots.length);
@@ -2345,8 +2345,8 @@ function buildAiPrompt(round) {
                     const short = b.shots.filter(s => s.distPct < -5).length;
                     const long = b.shots.filter(s => s.distPct > 5).length;
                     L.push(`\n${b.label} (${b.shots.length} shots, avg SG ${avgSg >= 0 ? '+' : ''}${avgSg.toFixed(2)}):`);
-                    L.push(`  Direction: avg ${avgDev >= 0 ? '+' : ''}${avgDev}° | ${left} left, ${b.shots.length - left - right} straight, ${right} right`);
-                    L.push(`  Distance: avg ${avgDistPct}% of target | ${short} short, ${b.shots.length - short - long} good, ${long} long`);
+                    L.push(`  ${t('ai.disp.direction')}: ${t('ai.disp.avg')} ${avgDev >= 0 ? '+' : ''}${avgDev}° | ${left} ${t('ai.disp.left')}, ${b.shots.length - left - right} ${t('ai.disp.straight')}, ${right} ${t('ai.disp.right')}`);
+                    L.push(`  ${t('ai.disp.distance')}: ${t('ai.disp.avg')} ${avgDistPct}${t('ai.disp.oftarget')} | ${short} ${t('ai.disp.short')}, ${b.shots.length - short - long} ${t('ai.disp.good')}, ${long} ${t('ai.disp.long')}`);
                 });
             }
         }
@@ -2357,12 +2357,12 @@ function buildAiPrompt(round) {
     if (health.length > 0) {
         const bbSamples = health.filter(s => s.body_battery != null).map(s => s.body_battery);
         const stressSamples = health.filter(s => s.stress_proxy != null && s.stress_proxy > 0).map(s => s.stress_proxy);
-        L.push('\n## Health & Wellness Summary');
+        L.push('\n' + t('ai.health'));
         if (bbSamples.length)
-            L.push(`Body Battery: ${bbSamples[0]}% → ${bbSamples[bbSamples.length-1]}% (drained ${bbSamples[0] - bbSamples[bbSamples.length-1]}%)`);
+            L.push(`${t('ai.health.bb')}: ${bbSamples[0]}% → ${bbSamples[bbSamples.length-1]}% (${t('ai.health.drained')} ${bbSamples[0] - bbSamples[bbSamples.length-1]}%)`);
         if (stressSamples.length) {
             const avg = Math.round(stressSamples.reduce((a,b) => a+b,0) / stressSamples.length);
-            L.push(`Stress: avg ${avg}, peak ${Math.max(...stressSamples)}`);
+            L.push(`${t('ai.health.stress')}: ${t('ai.health.avg')} ${avg}, ${t('ai.health.peak')} ${Math.max(...stressSamples)}`);
         }
 
         // Downsample to ~1 sample per minute
@@ -2379,12 +2379,13 @@ function buildAiPrompt(round) {
             if (best !== null) tempoByTs[best] = t.ratio;
         });
 
-        L.push('\n## Health Timeline (1-min intervals)');
-        L.push('Time | HR (bpm) | Altitude (m) | Stress | Tempo');
+        L.push('\n' + t('ai.timeline'));
+        L.push(`${t('ai.timeline.time')} | ${t('ai.timeline.hr')} | ${t('ai.timeline.alt')} | ${t('ai.timeline.stress')} | ${t('ai.timeline.tempo')}`);
         L.push('-----|----------|--------------|--------|------');
         pts.forEach(s => {
             const d = new Date((s.timestamp + GARMIN_EPOCH) * 1000);
-            const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+            const locale = getLang() === 'ko' ? 'ko-KR' : 'en-US';
+            const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
             const hr  = s.heart_rate ?? '-';
             const alt = s.altitude_meters != null ? Math.round(s.altitude_meters) : '-';
             const str = s.stress_proxy ?? '-';
@@ -2394,7 +2395,7 @@ function buildAiPrompt(round) {
     }
 
     L.push('\n---');
-    L.push('Please provide: 1) Overall performance summary, 2) Strengths, 3) Areas for improvement, 4) Patterns (tempo, HR, stress vs score), 5) Specific recommendations.');
+    L.push(t('ai.closing'));
     return L.join('\n');
 }
 
