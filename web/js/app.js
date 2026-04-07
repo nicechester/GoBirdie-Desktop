@@ -32,10 +32,6 @@ async function getStoreStats() {
     return invoke('get_store_stats');
 }
 
-async function checkWatch() {
-    return invoke('check_watch');
-}
-
 // ── UI helpers ───────────────────────────────────────────────────────────────
 
 function toast(msg, isError = false) {
@@ -2485,9 +2481,6 @@ async function init() {
         updateStats();
     });
     applyStaticTranslations();
-
-    // Watch connection polling removed — garmin_mtp probing triggers Android File Transfer.
-    // Sync button is always enabled; sync will show an error if watch is not connected.
 
     try {
         state.rounds = await getAllRounds();
