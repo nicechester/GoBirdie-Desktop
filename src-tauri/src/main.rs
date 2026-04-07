@@ -166,6 +166,21 @@ fn get_store_stats(state: State<'_, AppState>) -> serde_json::Value {
 }
 
 #[tauri::command]
+fn check_watch() -> bool {
+    // Use ioreg to detect a Garmin USB device without claiming the interface
+    let output = std::process::Command::new("ioreg")
+        .args(["-p", "IOUSB", "-l", "-w", "0"])
+        .output();
+    match output {
+        Ok(o) => {
+            let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
+            s.contains("garmin")
+        }
+        Err(_) => false,
+    }
+}
+
+#[tauri::command]
 fn get_clubs(state: State<'_, AppState>) -> Vec<ClubInfo> {
     state.clubs.lock().unwrap().clone()
 }
@@ -215,6 +230,7 @@ fn main() {
             get_round_detail,
             get_store_stats,
             get_clubs,
+            check_watch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
