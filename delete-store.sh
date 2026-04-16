@@ -1,8 +1,8 @@
 #!/bin/bash
-# Deletes the garmin-analyzer round store.
-# Store location: ~/Library/Application Support/garmin-analyzer/rounds.db
+# Deletes the GoBirdie Companion round store.
+# Store location: ~/Library/Application Support/go-birdie-companion/rounds.db
 
-STORE="$HOME/Library/Application Support/garmin-analyzer/rounds.db"
+STORE="$HOME/Library/Application Support/go-birdie-companion/rounds.db"
 
 if [ ! -d "$STORE" ]; then
     echo "Store not found: $STORE"

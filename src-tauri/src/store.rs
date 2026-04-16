@@ -1,7 +1,9 @@
 use sled::Db;
 use sha2::Digest;
 use std::path::Path;
-use crate::models::{GolfRound, RoundSummary};
+use crate::models::{GolfRound, RoundSummary, Settings};
+
+const SETTINGS_KEY: &[u8] = b"__app_settings__";
 
 pub struct Store {
     db: Db,
@@ -37,6 +39,22 @@ impl Store {
         })
     }
 
+    pub fn save_by_id(&self, id: &str, round: &GolfRound) -> Result<(), String> {
+        let key = id_hash(id);
+        let json = serde_json::to_vec(round)
+            .map_err(|e| format!("Serialize error: {}", e))?;
+        self.db.insert(key, json)
+            .map_err(|e| format!("Store insert error: {}", e))?;
+        self.db.flush()
+            .map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn contains_id(&self, id: &str) -> bool {
+        let key = id_hash(id);
+        self.db.contains_key(&key).unwrap_or(false)
+    }
+
     pub fn load_by_id(&self, id: &str) -> Option<GolfRound> {
         // The store key is raw SHA-256 bytes; the round's id field is the hex encoding.
         // Scan all values and match by id field.
@@ -60,6 +78,22 @@ impl Store {
     pub fn count(&self) -> usize {
         self.db.len()
     }
+
+    pub fn load_settings(&self) -> Option<Settings> {
+        self.db.get(SETTINGS_KEY).ok().flatten().and_then(|bytes| {
+            serde_json::from_slice(&bytes).ok()
+        })
+    }
+
+    pub fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+        let json = serde_json::to_vec(settings)
+            .map_err(|e| format!("Serialize settings error: {}", e))?;
+        self.db.insert(SETTINGS_KEY, json)
+            .map_err(|e| format!("Store settings error: {}", e))?;
+        self.db.flush()
+            .map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
 }
 
 fn file_hash(path: &Path) -> Vec<u8> {
@@ -71,4 +105,10 @@ fn file_hash(path: &Path) -> Vec<u8> {
         }
         Err(_) => path.to_string_lossy().as_bytes().to_vec(),
     }
+}
+
+fn id_hash(id: &str) -> Vec<u8> {
+    let mut hasher = sha2::Sha256::new();
+    Digest::update(&mut hasher, id.as_bytes());
+    Digest::finalize(hasher).to_vec()
 }

@@ -3,6 +3,28 @@ use serde::{Deserialize, Serialize};
 
 pub const GARMIN_EPOCH_OFFSET: i64 = 631065600;
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub player_name: String,
+    pub device_source: String,  // "garmin" | "apple"
+    #[serde(default = "default_tee_color")]
+    pub tee_color: String,      // "Black" | "Blue" | "White" | "Yellow" | "Red"
+}
+
+fn default_tee_color() -> String { "Blue".to_string() }
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            player_name: String::new(),
+            device_source: String::new(),
+            tee_color: default_tee_color(),
+        }
+    }
+}
+
 // ── GPS ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +266,8 @@ impl Scorecard {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GolfRound {
     pub id: String,
+    #[serde(default = "default_source_garmin")]
+    pub source: String,
     pub start_ts: i64,
     pub end_ts: i64,
     pub duration_seconds: f32,
@@ -276,6 +300,7 @@ impl GolfRound {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoundSummary {
     pub id: String,
+    pub source: String,
     pub date: String,
     pub time: String,
     pub course_name: String,
@@ -295,12 +320,15 @@ pub struct RoundSummary {
     pub avg_swing_tempo: Option<f32>,
 }
 
+fn default_source_garmin() -> String { "garmin".to_string() }
+
 impl From<&GolfRound> for RoundSummary {
     fn from(r: &GolfRound) -> Self {
         let dt = r.start_datetime();
         let sc = r.scorecard.as_ref();
         RoundSummary {
             id: r.id.clone(),
+            source: r.source.clone(),
             date: dt.format("%Y-%m-%d").to_string(),
             time: dt.format("%H:%M").to_string(),
             course_name: sc.map(|s| s.course_name.clone()).unwrap_or_default(),
