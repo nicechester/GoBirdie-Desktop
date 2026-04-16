@@ -45,6 +45,10 @@ async function syncAppleRounds() {
     return invoke('sync_apple_rounds');
 }
 
+async function deleteRound(id) {
+    return invoke('delete_round', { id });
+}
+
 // ── UI helpers ───────────────────────────────────────────────────────────────
 
 function toast(msg, isError = false) {
@@ -135,9 +139,73 @@ function renderRoundsList() {
 
     list.querySelectorAll('.round-item').forEach(el => {
         el.addEventListener('click', () => loadDetail(el.dataset.id));
+        el.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showDeleteMenu(e, el.dataset.id);
+        });
     });
 
     document.getElementById('load-more-btn')?.addEventListener('click', handleLoadMore);
+}
+
+// ── Context menu (delete) ────────────────────────────────────────────────────
+
+function showDeleteMenu(e, roundId) {
+    removeContextMenu();
+    const menu = document.createElement('div');
+    menu.id = 'ctx-menu';
+    menu.className = 'fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm';
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    menu.innerHTML = `<button class="w-full text-left px-4 py-2 hover:bg-red-50 text-red-600">${t('ctx.delete')}</button>`;
+    document.body.appendChild(menu);
+    menu.querySelector('button').addEventListener('click', () => {
+        removeContextMenu();
+        confirmDeleteRound(roundId);
+    });
+    setTimeout(() => document.addEventListener('click', removeContextMenu, { once: true }), 0);
+}
+
+function removeContextMenu() {
+    document.getElementById('ctx-menu')?.remove();
+}
+
+function confirmDeleteRound(roundId) {
+    const r = state.rounds.find(r => r.id === roundId);
+    const name = r?.course_name || 'this round';
+    const modal = document.getElementById('setup-modal');
+    modal.innerHTML = `
+    <div class="modal-card" style="max-width:360px">
+        <div class="text-center mb-4">
+            <div class="text-3xl mb-2">🗑️</div>
+            <h2 class="text-lg font-bold text-gray-800">${t('delete.title')}</h2>
+            <p class="text-sm text-gray-500 mt-2">${t('delete.msg', { name })}</p>
+        </div>
+        <div class="flex gap-3">
+            <button id="del-cancel" class="flex-1 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">${t('delete.cancel')}</button>
+            <button id="del-confirm" class="flex-1 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700">${t('delete.confirm')}</button>
+        </div>
+    </div>`;
+    modal.classList.remove('hidden');
+    modal.querySelector('#del-cancel').addEventListener('click', () => modal.classList.add('hidden'));
+    modal.querySelector('#del-confirm').addEventListener('click', async () => {
+        modal.classList.add('hidden');
+        try {
+            await deleteRound(roundId);
+            state.rounds = state.rounds.filter(r => r.id !== roundId);
+            if (state.activeId === roundId) {
+                state.activeId = null;
+                state.activeRound = null;
+                document.getElementById('detail-content').classList.add('hidden');
+                document.getElementById('detail-empty').classList.remove('hidden');
+            }
+            renderRoundsList();
+            updateStats();
+            toast(t('toast.deleted'));
+        } catch (e) {
+            toast(t('toast.deletefail', { err: e }), true);
+        }
+    });
 }
 
 // ── Round detail ─────────────────────────────────────────────────────────────

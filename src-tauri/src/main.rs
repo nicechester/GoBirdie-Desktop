@@ -183,6 +183,11 @@ fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), S
 }
 
 #[tauri::command]
+fn delete_round(id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    state.store.lock().unwrap().delete_by_id(&id)
+}
+
+#[tauri::command]
 async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
     let list = apple_sync::fetch_round_list()?;
 
@@ -253,6 +258,7 @@ fn main() {
             get_settings,
             save_settings,
             sync_apple_rounds,
+            delete_round,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
