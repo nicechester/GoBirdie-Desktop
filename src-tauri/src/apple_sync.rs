@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use serde::Deserialize;
 use crate::models::{
-    GolfRound, GpsPoint, HoleDefinition, HoleScore, Scorecard, ShotPosition,
+    GolfRound, GpsPoint, HealthSample, HoleDefinition, HoleScore, Scorecard, ShotPosition,
     GARMIN_EPOCH_OFFSET,
 };
 
@@ -21,6 +21,15 @@ pub struct AppleRound {
     pub started_at: String,
     pub ended_at: Option<String>,
     pub holes: Vec<AppleHoleScore>,
+    #[serde(default)]
+    pub heart_rate_timeline: Vec<AppleHeartRateSample>,
+}
+
+#[derive(Deserialize)]
+pub struct AppleHeartRateSample {
+    pub timestamp: String,
+    pub bpm: u32,
+    pub altitude_meters: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -184,6 +193,25 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
         hole_scores,
     };
 
+    let health_timeline: Vec<HealthSample> = r.heart_rate_timeline.iter().map(|s| {
+        HealthSample {
+            timestamp: iso_to_garmin(&s.timestamp),
+            position: None,
+            heart_rate: Some(s.bpm.min(255) as u8),
+            stress_proxy: None,
+            body_battery: None,
+            distance_meters: None,
+            altitude_meters: s.altitude_meters,
+        }
+    }).collect();
+
+    let avg_hr = if health_timeline.is_empty() { None } else {
+        let sum: u32 = health_timeline.iter().filter_map(|s| s.heart_rate).map(|h| h as u32).sum();
+        let count = health_timeline.iter().filter(|s| s.heart_rate.is_some()).count() as u32;
+        if count > 0 { Some((sum / count).min(255) as u8) } else { None }
+    };
+    let max_hr = health_timeline.iter().filter_map(|s| s.heart_rate).max();
+
     GolfRound {
         id: r.id,
         source: r.source,
@@ -192,8 +220,8 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
         duration_seconds,
         distance_meters: 0.0,
         calories: None,
-        avg_heart_rate: None,
-        max_heart_rate: None,
+        avg_heart_rate: avg_hr,
+        max_heart_rate: max_hr,
         total_ascent: None,
         total_descent: None,
         min_altitude_meters: None,
@@ -201,7 +229,7 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
         avg_swing_tempo: None,
         tempo_timeline: Vec::new(),
         shots: Vec::new(),
-        health_timeline: Vec::new(),
+        health_timeline,
         scorecard: Some(scorecard),
         clubs: Vec::new(),
     }

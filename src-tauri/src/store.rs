@@ -79,6 +79,23 @@ impl Store {
         self.db.len()
     }
 
+    pub fn delete_by_id(&self, id: &str) -> Result<bool, String> {
+        for item in self.db.iter() {
+            if let Ok((key, val)) = item {
+                if let Ok(r) = serde_json::from_slice::<GolfRound>(&val) {
+                    if r.id == id {
+                        self.db.remove(&key)
+                            .map_err(|e| format!("Delete error: {}", e))?;
+                        self.db.flush()
+                            .map_err(|e| format!("Flush error: {}", e))?;
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
     pub fn load_settings(&self) -> Option<Settings> {
         self.db.get(SETTINGS_KEY).ok().flatten().and_then(|bytes| {
             serde_json::from_slice(&bytes).ok()

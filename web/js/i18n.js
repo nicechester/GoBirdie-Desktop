@@ -195,6 +195,15 @@ export const STRINGS = {
         'toast.syncfail': 'Sync failed: {err}',
         'toast.loadfail': 'Load failed: {err}',
         'toast.copied': 'Prompt copied! Paste it on gemini.google.com or chatgpt.com',
+        'toast.deleted': 'Round deleted',
+        'toast.deletefail': 'Delete failed: {err}',
+
+        // Context menu
+        'ctx.delete': '🗑 Delete Round',
+        'delete.title': 'Delete Round?',
+        'delete.msg': 'Are you sure you want to delete <b>{name}</b>? This cannot be undone.',
+        'delete.cancel': 'Cancel',
+        'delete.confirm': 'Delete',
 
         // Direction labels
         'dir.straight': 'Straight',
@@ -406,6 +415,15 @@ export const STRINGS = {
         'toast.syncfail': '동기화 실패: {err}',
         'toast.loadfail': '로드 실패: {err}',
         'toast.copied': '프롬프트 복사 완료! gemini.google.com 또는 chatgpt.com에 붙여넣기하세요',
+        'toast.deleted': '라운드 삭제 완료',
+        'toast.deletefail': '삭제 실패: {err}',
+
+        // Context menu
+        'ctx.delete': '🗑 라운드 삭제',
+        'delete.title': '라운드를 삭제하시겠습니까?',
+        'delete.msg': '<b>{name}</b>을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.',
+        'delete.cancel': '취소',
+        'delete.confirm': '삭제',
 
         // Direction labels
         'dir.straight': '직진',
