@@ -7,11 +7,12 @@ const PAGE_SIZE = 10;
 const state = {
     rounds: [],
     activeId: null,
-    activeTab: 'overview',  // 'overview' | 'shotmap' | 'stats' | 'sg'
+    activeTab: 'overview',
     searchTerm: '',
     syncOffset: 0,
     syncing: false,
-    activeRound: null,      // full GolfRound for current detail
+    activeRound: null,
+    settings: null,         // { player_name, device_source }
 };
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -30,6 +31,18 @@ async function getRoundDetail(id) {
 
 async function getStoreStats() {
     return invoke('get_store_stats');
+}
+
+async function getSettings() {
+    return invoke('get_settings');
+}
+
+async function saveSettings(settings) {
+    return invoke('save_settings', { settings });
+}
+
+async function syncAppleRounds() {
+    return invoke('sync_apple_rounds');
 }
 
 // ── UI helpers ───────────────────────────────────────────────────────────────
@@ -91,7 +104,7 @@ function renderRoundsList() {
         <div class="round-item ${r.id === state.activeId ? 'active' : ''}" data-id="${r.id}">
             <div class="flex items-center justify-between">
                 <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm text-gray-800 truncate">${r.course_name || 'Unknown Course'}</div>
+                    <div class="font-medium text-sm text-gray-800 truncate">${r.source === 'apple' ? '📱 ' : '⌚ '}${r.course_name || 'Unknown Course'}</div>
                     <div class="text-xs text-gray-500">${r.date} · ${r.holes_played}H · ${r.duration_minutes}min</div>
                 </div>
                 <div class="ml-2 flex flex-col items-center">
@@ -2401,6 +2414,124 @@ function buildAiPrompt(round) {
 
 // ── Event handlers ───────────────────────────────────────────────────────────
 
+function applySyncButtonVisibility() {
+    const syncBtn   = document.getElementById('sync-btn');
+    const appleSyncBtn = document.getElementById('apple-sync-btn');
+    if (state.settings?.device_source === 'apple') {
+        syncBtn.classList.add('hidden');
+        appleSyncBtn?.classList.remove('hidden');
+    } else {
+        syncBtn.classList.remove('hidden');
+        appleSyncBtn?.classList.add('hidden');
+    }
+}
+
+function renderSetupModal(isFirstRun) {
+    const modal = document.getElementById('setup-modal');
+    const name = state.settings?.player_name ?? '';
+    const device = state.settings?.device_source ?? '';
+
+    modal.innerHTML = `
+    <div class="modal-card">
+        <div class="text-center mb-6">
+            <div class="text-4xl mb-2">⛳</div>
+            <h2 class="text-xl font-bold">
+                <span class="text-red-500">Go</span><span class="text-blue-600">Birdie</span>
+                ${!isFirstRun ? ` <span class="text-gray-400 font-normal text-base">${t('settings.title')}</span>` : ''}
+            </h2>
+            ${isFirstRun ? `<p class="text-sm text-gray-500 mt-1">${t('setup.subtitle')}</p>` : ''}
+        </div>
+        <div class="space-y-5">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">${t('setup.name')}</label>
+                <input type="text" id="setup-name" value="${name}" placeholder="${t('setup.name.placeholder')}"
+                    class="w-full p-2.5 border rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">${t('setup.device')}</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="device-option ${device === 'garmin' ? 'selected' : ''}" data-device="garmin">
+                        <div class="device-icon">⌚</div>
+                        <div class="device-name">${t('setup.device.garmin')}</div>
+                        <div class="device-desc">${t('setup.device.garmin.desc')}</div>
+                    </div>
+                    <div class="device-option ${device === 'apple' ? 'selected' : ''}" data-device="apple">
+                        <div class="device-icon">⌚</div>
+                        <div class="device-name">${t('setup.device.apple')}</div>
+                        <div class="device-desc">${t('setup.device.apple.desc')}</div>
+                    </div>
+                </div>
+            </div>
+            <div id="setup-error" class="text-red-500 text-xs text-center hidden">${t('setup.validation')}</div>
+            <button id="setup-save-btn"
+                class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
+                ${isFirstRun ? t('setup.save') : t('settings.save')}
+            </button>
+        </div>
+    </div>`;
+
+    modal.classList.remove('hidden');
+
+    let selectedDevice = device;
+
+    modal.querySelectorAll('.device-option').forEach(el => {
+        el.addEventListener('click', () => {
+            modal.querySelectorAll('.device-option').forEach(o => o.classList.remove('selected'));
+            el.classList.add('selected');
+            selectedDevice = el.dataset.device;
+        });
+    });
+
+    modal.querySelector('#setup-save-btn').addEventListener('click', async () => {
+        const playerName = modal.querySelector('#setup-name').value.trim();
+        if (!playerName || !selectedDevice) {
+            modal.querySelector('#setup-error').classList.remove('hidden');
+            return;
+        }
+        const settings = { player_name: playerName, device_source: selectedDevice };
+        try {
+            await saveSettings(settings);
+            state.settings = settings;
+            modal.classList.add('hidden');
+            applySyncButtonVisibility();
+            if (isFirstRun) {
+                await loadInitialData();
+            }
+        } catch (e) {
+            toast(`Settings save failed: ${e}`, true);
+        }
+    });
+}
+
+async function handleAppleSync() {
+    if (state.syncing) return;
+    state.syncing = true;
+
+    const btn   = document.getElementById('apple-sync-btn');
+    const label = document.getElementById('apple-sync-label');
+    btn.disabled = true;
+    label.textContent = t('sync.apple.syncing');
+
+    try {
+        const newSummaries = await syncAppleRounds();
+        const existing = new Map(state.rounds.map(r => [r.id, r]));
+        newSummaries.forEach(r => existing.set(r.id, r));
+        state.rounds = [...existing.values()].sort((a, b) => b.date.localeCompare(a.date));
+
+        renderRoundsList();
+        if (newSummaries.length > 0) loadDetail(newSummaries[0].id);
+        toast(t('toast.synced', { count: newSummaries.length }));
+        updateStats();
+    } catch (e) {
+        const msg = String(e).includes('not found') ? t('sync.apple.notfound') : t('toast.syncfail', { err: e });
+        toast(msg, true);
+    } finally {
+        state.syncing = false;
+        btn.disabled = false;
+        label.textContent = t('sync.apple.label');
+    }
+}
+
 async function handleSync() {
     if (state.syncing) return;
     state.syncing = true;
@@ -2468,9 +2599,15 @@ async function updateStats() {
 
 async function init() {
     document.getElementById('sync-btn').addEventListener('click', handleSync);
+    document.getElementById('apple-sync-btn')?.addEventListener('click', handleAppleSync);
     document.getElementById('search-input').addEventListener('input', e => {
         state.searchTerm = e.target.value.toLowerCase();
         renderRoundsList();
+    });
+
+    // Settings gear button
+    document.getElementById('settings-btn').addEventListener('click', () => {
+        renderSetupModal(false);
     });
 
     // Language selector
@@ -2482,13 +2619,32 @@ async function init() {
     });
     applyStaticTranslations();
 
+    // Check first-run: load settings
+    try {
+        const settings = await getSettings();
+        if (!settings || !settings.device_source) {
+            // First run — show setup modal, don't load data yet
+            renderSetupModal(true);
+            return;
+        }
+        state.settings = settings;
+        applySyncButtonVisibility();
+        await loadInitialData();
+    } catch (e) {
+        console.error('Init error:', e);
+        // If settings fetch fails, show setup anyway
+        renderSetupModal(true);
+    }
+}
+
+async function loadInitialData() {
     try {
         state.rounds = await getAllRounds();
         renderRoundsList();
         updateStats();
         if (state.rounds.length > 0) loadDetail(state.rounds[0].id);
     } catch (e) {
-        console.error('Init error:', e);
+        console.error('Load error:', e);
     }
 }
 

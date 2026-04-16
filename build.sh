@@ -16,6 +16,14 @@ clang \
   "${NATIVE_SRC}"
 echo "    ${NATIVE_BIN}-${TARGET_TRIPLE} built"
 
+# ── 1b. Compile Swift sync helper ────────────────────────────────────────────
+echo "==> Building gobirdie-sync-helper..."
+SYNC_HELPER_DIR="src-tauri/src/native"
+SYNC_HELPER_OUT="${SYNC_HELPER_DIR}/gobirdie-sync-helper-${TARGET_TRIPLE}"
+(cd "${SYNC_HELPER_DIR}" && swift build -c release)
+cp "${SYNC_HELPER_DIR}/.build/release/gobirdie-sync-helper" "${SYNC_HELPER_OUT}"
+echo "    ${SYNC_HELPER_OUT} built"
+
 # ── 2. JS deps + Tauri build ──────────────────────────────────────────────────
 echo "==> Installing JS dependencies..."
 npm install

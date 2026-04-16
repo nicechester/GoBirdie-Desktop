@@ -4,11 +4,13 @@ mod models;
 mod parser;
 mod store;
 mod mtp;
+mod apple_sync;
+
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use sha2::Digest;
-use models::{GolfRound, RoundSummary, ClubInfo};
+use models::{GolfRound, RoundSummary, ClubInfo, Settings};
 use store::Store;
 use tauri::State;
 
@@ -170,6 +172,39 @@ fn get_clubs(state: State<'_, AppState>) -> Vec<ClubInfo> {
     state.clubs.lock().unwrap().clone()
 }
 
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> Option<Settings> {
+    state.store.lock().unwrap().load_settings()
+}
+
+#[tauri::command]
+fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), String> {
+    state.store.lock().unwrap().save_settings(&settings)
+}
+
+#[tauri::command]
+async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
+    let list = apple_sync::fetch_round_list()?;
+
+    let mut new_summaries = Vec::new();
+    for summary in list {
+        {
+            let store = state.store.lock().unwrap();
+            if store.contains_id(&summary.id) {
+                continue;
+            }
+        }
+
+        let full = apple_sync::fetch_round(&summary.id)?;
+        let round = apple_sync::convert_apple_round(full);
+        let rs = RoundSummary::from(&round);
+        state.store.lock().unwrap().save_by_id(&summary.id, &round)?;
+        new_summaries.push(rs);
+    }
+
+    Ok(new_summaries)
+}
+
 #[allow(dead_code)]
 fn try_load_clubs(state: &AppState) -> Result<(), String> {
     // Look for Clubs.fit in the fit_dir
@@ -184,7 +219,7 @@ fn try_load_clubs(state: &AppState) -> Result<(), String> {
 fn main() {
     let app_dir = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("garmin-analyzer");
+        .join("go-birdie-desktop");
     std::fs::create_dir_all(&app_dir).ok();
 
     let db_path = app_dir.join("rounds.db");
@@ -215,6 +250,9 @@ fn main() {
             get_round_detail,
             get_store_stats,
             get_clubs,
+            get_settings,
+            save_settings,
+            sync_apple_rounds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

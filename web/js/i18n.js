@@ -22,7 +22,7 @@ export function t(key, params = {}) {
 export const STRINGS = {
     en: {
         // Header
-        'app.title': 'Garmin Golf Analyzer',
+        'app.title': 'Desktop',
         'sync.label': 'Sync Watch',
         'sync.syncing': 'Syncing...',
         'rounds.stored': '{count} round{s} stored',
@@ -209,11 +209,31 @@ export const STRINGS = {
         'dir.good': 'Good',
         'dir.short': 'Short',
         'dir.wayshort': 'Way Short',
+
+        // Settings / Setup
+        'setup.title': 'Welcome to GoBirdie',
+        'setup.subtitle': 'Let\'s get you set up before your first round.',
+        'setup.name': 'Your Name',
+        'setup.name.placeholder': 'e.g. Chester',
+        'setup.device': 'How do you track your rounds?',
+        'setup.device.garmin': 'Garmin Watch',
+        'setup.device.garmin.desc': 'Sync via USB cable',
+        'setup.device.apple': 'Apple Watch',
+        'setup.device.apple.desc': 'Sync over local WiFi',
+        'setup.save': 'Get Started',
+        'setup.validation': 'Please enter your name and select a device.',
+        'settings.title': 'Settings',
+        'settings.save': 'Save',
+
+        // Apple sync
+        'sync.apple.label': 'Sync iPhone',
+        'sync.apple.syncing': 'Syncing...',
+        'sync.apple.notfound': 'iPhone not found on network',
     },
 
     ko: {
         // Header
-        'app.title': '가민 골프 분석기',
+        'app.title': 'Desktop',
         'sync.label': '워치 동기화',
         'sync.syncing': '동기화 중...',
         'rounds.stored': '{count}개 라운드 저장됨',
@@ -400,6 +420,26 @@ export const STRINGS = {
         'dir.good': '적정',
         'dir.short': '짧게',
         'dir.wayshort': '매우 짧게',
+
+        // Settings / Setup
+        'setup.title': 'GoBirdie에 오신 것을 환영합니다',
+        'setup.subtitle': '첫 라운드 전에 설정을 완료하세요.',
+        'setup.name': '이름',
+        'setup.name.placeholder': '예: 홍길동',
+        'setup.device': '라운드를 어떻게 기록하시나요?',
+        'setup.device.garmin': '가민 워치',
+        'setup.device.garmin.desc': 'USB 케이블로 동기화',
+        'setup.device.apple': '애플 워치',
+        'setup.device.apple.desc': '로컬 WiFi로 동기화',
+        'setup.save': '시작하기',
+        'setup.validation': '이름을 입력하고 기기를 선택해 주세요.',
+        'settings.title': '설정',
+        'settings.save': '저장',
+
+        // Apple sync
+        'sync.apple.label': '아이폰 동기화',
+        'sync.apple.syncing': '동기화 중...',
+        'sync.apple.notfound': '네트워크에서 아이폰을 찾을 수 없습니다',
     }
 };
 

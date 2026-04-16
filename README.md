@@ -1,6 +1,6 @@
-# Garmin Golf Analyzer
+# GoBirdie Desktop
 
-A desktop application for analyzing Garmin golf round data. Built with Tauri 2, Rust, and vanilla JavaScript.
+A desktop app for analyzing golf round data from Garmin and Apple Watch. Built with Tauri 2, Rust, and vanilla JavaScript.
 
 🇰🇷 [한국어 README](README.ko.md)
 
@@ -67,7 +67,7 @@ Pre-built macOS binaries are available on the [Releases page](https://github.com
 ## Architecture
 
 ```
-tauri/
+GoBirdie-Desktop/
 ├── src-tauri/              Rust backend
 │   ├── src/
 │   │   ├── main.rs         Tauri entry point, command registration
@@ -115,7 +115,7 @@ clang -I/opt/homebrew/include -L/opt/homebrew/lib -lmtp \
 ## Development
 
 ```bash
-cd tauri
+cd desktop/GoBirdie-Desktop
 npm install
 npm run tauri:dev
 ```
@@ -142,6 +142,8 @@ All commands are invoked from the frontend via `invoke()` from `@tauri-apps/api/
 | `get_round_detail(id)` | Returns the full `GolfRound` for a given ID, including scorecard and health timeline |
 | `get_clubs` | Returns all `ClubInfo` entries loaded from `Clubs.fit` |
 | `get_store_stats` | Returns `{ round_count }` |
+| `get_settings` | Returns the saved `Settings` object (`player_name`, `device_source`) |
+| `save_settings` | Persists `Settings` to the store |
 
 ## Data Model
 
@@ -150,6 +152,7 @@ All commands are invoked from the frontend via `invoke()` from `@tauri-apps/api/
 Top-level record combining activity and scorecard data.
 
 - `id` — SHA-256 of the activity FIT file (deduplication key)
+- `source` — `"garmin"` or `"apple"` (defaults to `"garmin"` for existing rounds)
 - `start_ts`, `end_ts` — Garmin epoch timestamps (add 631065600 for Unix time)
 - `duration_seconds`, `distance_meters`, `calories`
 - `avg_heart_rate`, `max_heart_rate`, `total_ascent`, `total_descent`
@@ -207,7 +210,7 @@ One sample per Record message from the activity FIT file.
 Rounds are stored in a [sled](https://github.com/spacejam/sled) embedded database at:
 
 ```
-~/Library/Application Support/garmin-analyzer/rounds.db
+~/Library/Application Support/go-birdie-companion/rounds.db
 ```
 
 The key for each round is the SHA-256 hash of the activity FIT file, which prevents duplicate imports if the same file is processed multiple times.
@@ -257,6 +260,10 @@ Android File Transfer must not be running when syncing. The app kills it automat
 ## Internationalization (i18n)
 
 The app supports English and Korean. A flag-based language toggle in the header switches all UI strings, NLG insights, and date formatting between locales. Language preference is persisted in `localStorage` under the `garmin-golf-lang` key.
+
+## First-Run Setup
+
+On first launch, a setup modal prompts for your name and device type (Garmin Watch or Apple Watch). This is persisted via `save_settings` and controls which sync UI is shown — the "Sync Watch" button is hidden when Apple Watch is selected (sync happens over local WiFi via mDNS).
 
 - `i18n.js` — `t(key, params)` translation function, EN/KO string dictionaries (~100+ keys), language selector with flag icons
 - `nlg-templates.js` — All ~35 insight templates have bilingual `messages: { en: [...], ko: [...] }` format

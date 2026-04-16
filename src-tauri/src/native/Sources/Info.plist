@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.gobirdie.sync-helper</string>
+    <key>CFBundleName</key>
+    <string>gobirdie-sync-helper</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>GoBirdie uses the local network to sync golf rounds from your iPhone.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_gobirdie._tcp</string>
+    </array>
+</dict>
+</plist>

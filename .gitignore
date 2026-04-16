@@ -5,6 +5,9 @@ dist/
 # Rust
 src-tauri/target/
 
+# Swift
+src-tauri/src/native/.build/
+
 # Store data
 *.mv
 *.mv.lock

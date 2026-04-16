@@ -230,6 +230,7 @@ pub fn parse_activity(path: &Path) -> Result<GolfRound, String> {
 
     Ok(GolfRound {
         id: String::new(),
+        source: "garmin".to_string(),
         start_ts, end_ts, duration_seconds: duration, distance_meters: distance,
         calories, avg_heart_rate: avg_hr, max_heart_rate: max_hr,
         total_ascent: ascent, total_descent: descent,
