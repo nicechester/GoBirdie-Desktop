@@ -955,8 +955,13 @@ function renderShotMap(round) {
         const cat  = shot.club_category ?? '';
         if (cat === 'putt') return 'P';
         if (!name) return cat.slice(0,1).toUpperCase();
-        const m = name.match(/^(\d+)[-\s]?(Wood|Iron)/i);
-        if (m) return (name.toLowerCase().includes('iron') ? 'I' : 'W') + m[1];
+        const m = name.match(/^(\d+)[-\s]?(Wood|Iron|Hybrid)/i);
+        if (m) {
+            const t = m[2].toLowerCase();
+            if (t === 'iron') return m[1] + 'i';
+            if (t === 'hybrid') return m[1] + 'H';
+            return m[1] + 'W';
+        }
         if (name.length <= 3) return name;
         if (name === 'Driver') return 'Dr';
         if (name === 'Hybrid') return 'H';
