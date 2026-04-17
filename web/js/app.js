@@ -1157,6 +1157,26 @@ function renderShotMap(round) {
         marker.on('mouseout',  () => marker.closePopup());
     });
 
+    // Putt count markers at green (last shot destination per hole)
+    sc.hole_scores.forEach(hs => {
+        if (!hs.shots.length || !hs.putts) return;
+        const lastShot = hs.shots[hs.shots.length - 1];
+        const greenPos = lastShot.to;
+        if (!greenPos || (greenPos.lat === lastShot.from.lat && greenPos.lon === lastShot.from.lon)) return;
+        const layer = holeLayers[hs.hole_number];
+        if (!layer) return;
+        const label = hs.putts === 1 ? '1 putt' : `${hs.putts} putts`;
+        L.marker([greenPos.lat, greenPos.lon], {
+            icon: L.divIcon({
+                className: '',
+                html: `<div style="background:#16a34a;color:white;font-size:10px;font-weight:700;
+                    border-radius:14px;padding:2px 7px;white-space:nowrap;
+                    border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3)">${label}</div>`,
+                iconSize: [60, 20], iconAnchor: [30, 10],
+            })
+        }).addTo(layer);
+    });
+
     // GPS trail layer from health_timeline
     const trailPts = round.health_timeline
         .filter(s => s.position?.lat && s.position?.lon)

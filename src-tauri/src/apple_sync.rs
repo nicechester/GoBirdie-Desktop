@@ -40,6 +40,7 @@ pub struct AppleHoleScore {
     pub putts: u8,
     pub fairway_hit: Option<bool>,
     pub shots: Vec<AppleShot>,
+    pub green_center: Option<GpsPoint>,
 }
 
 #[derive(Deserialize)]
@@ -158,7 +159,7 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
             tee_position: None,
         });
 
-        let shots = convert_shots(&hole.shots);
+        let shots = convert_shots(&hole.shots, hole.green_center.as_ref());
         total_score  = total_score.saturating_add(hole.strokes);
         total_putts  = total_putts.saturating_add(hole.putts);
 
@@ -272,7 +273,7 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
     }
 }
 
-fn convert_shots(shots: &[AppleShot]) -> Vec<ShotPosition> {
+fn convert_shots(shots: &[AppleShot], green_center: Option<&GpsPoint>) -> Vec<ShotPosition> {
     shots.windows(2).map(|w| {
         let from = w[0].location.clone();
         let to   = w[1].location.clone();
@@ -292,13 +293,15 @@ fn convert_shots(shots: &[AppleShot]) -> Vec<ShotPosition> {
         }
     }).chain(shots.last().map(|last| {
         let (club_name, club_category) = map_club(&last.club);
+        let to = green_center.cloned().unwrap_or_else(|| last.location.clone());
+        let dist = last.location.distance_meters_to(&to);
         ShotPosition {
             from: last.location.clone(),
-            to: last.location.clone(),
+            to,
             club_id: 0,
             club_name: Some(club_name.to_string()),
             club_category: Some(club_category.to_string()),
-            distance_meters: Some(0.0),
+            distance_meters: Some(dist),
             heart_rate: last.heart_rate_bpm.map(|v| v.min(255) as u8),
             altitude_meters: last.altitude_meters,
             swing_tempo: None,
