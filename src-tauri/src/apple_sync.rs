@@ -146,7 +146,7 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
     let mut total_score: u8 = 0;
     let mut total_putts: u8 = 0;
 
-    for hole in r.holes {
+    for hole in &r.holes {
         hole_definitions.push(HoleDefinition {
             hole_number: hole.number,
             par: hole.par,
@@ -193,7 +193,8 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
         hole_scores,
     };
 
-    let health_timeline: Vec<HealthSample> = r.heart_rate_timeline.iter().map(|s| {
+    // Build health timeline from heart rate samples and shots with altitude
+    let mut health_timeline: Vec<HealthSample> = r.heart_rate_timeline.iter().map(|s| {
         HealthSample {
             timestamp: iso_to_garmin(&s.timestamp),
             position: None,
@@ -205,12 +206,45 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
         }
     }).collect();
 
+    // If health_timeline is empty, populate from shots with altitude data
+    if health_timeline.is_empty() {
+        for hole in &r.holes {
+            for shot in &hole.shots {
+                if shot.altitude_meters.is_some() {
+                    health_timeline.push(HealthSample {
+                        timestamp: iso_to_garmin(&shot.timestamp),
+                        position: Some(shot.location.clone()),
+                        heart_rate: shot.heart_rate_bpm.map(|v| v.min(255) as u8),
+                        stress_proxy: None,
+                        body_battery: None,
+                        distance_meters: None,
+                        altitude_meters: shot.altitude_meters,
+                    });
+                }
+            }
+        }
+        // Sort by timestamp to maintain order
+        health_timeline.sort_by_key(|s| s.timestamp);
+    }
+
     let avg_hr = if health_timeline.is_empty() { None } else {
         let sum: u32 = health_timeline.iter().filter_map(|s| s.heart_rate).map(|h| h as u32).sum();
         let count = health_timeline.iter().filter(|s| s.heart_rate.is_some()).count() as u32;
         if count > 0 { Some((sum / count).min(255) as u8) } else { None }
     };
     let max_hr = health_timeline.iter().filter_map(|s| s.heart_rate).max();
+
+    // Extract altitude from shots (iOS records altitude per shot, not in heart_rate_timeline)
+    let mut altitudes: Vec<f64> = Vec::new();
+    for hole in &r.holes {
+        for shot in &hole.shots {
+            if let Some(alt) = shot.altitude_meters {
+                altitudes.push(alt);
+            }
+        }
+    }
+    let min_altitude_meters = altitudes.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_altitude_meters = altitudes.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
     GolfRound {
         id: r.id,
@@ -224,8 +258,8 @@ pub fn convert_apple_round(r: AppleRound) -> GolfRound {
         max_heart_rate: max_hr,
         total_ascent: None,
         total_descent: None,
-        min_altitude_meters: None,
-        max_altitude_meters: None,
+        min_altitude_meters: if altitudes.is_empty() { None } else { Some(min_altitude_meters as f32) },
+        max_altitude_meters: if altitudes.is_empty() { None } else { Some(max_altitude_meters as f32) },
         avg_swing_tempo: None,
         tempo_timeline: Vec::new(),
         shots: Vec::new(),

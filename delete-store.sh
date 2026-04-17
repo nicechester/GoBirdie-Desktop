@@ -2,7 +2,7 @@
 # Deletes the GoBirdie Companion round store.
 # Store location: ~/Library/Application Support/go-birdie-companion/rounds.db
 
-STORE="$HOME/Library/Application Support/go-birdie-companion/rounds.db"
+STORE="$HOME/Library/Application Support/go-birdie-desktop"
 
 if [ ! -d "$STORE" ]; then
     echo "Store not found: $STORE"
