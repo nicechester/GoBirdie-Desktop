@@ -430,33 +430,46 @@ function renderTimelineChart(round) {
     // Build hole markers and store in shared variable
     activeHoleMarkers = [];
     const sc = round.scorecard;
-    if (sc?.hole_scores?.length > 0 && round.shots?.length > 0) {
+    if (sc?.hole_scores?.length > 0) {
         const sortedHoles = [...sc.hole_scores].sort((a, b) => a.hole_number - b.hole_number);
-        let minTimestamp = -Infinity;
 
-        sortedHoles.forEach(hs => {
-            if (!hs.shots?.length) return;
-            const shotFrom = hs.shots[0].from;
-            // Find best matching activity shot after previous hole, within GPS proximity
-            let best = null, bestDist = Infinity;
-            for (const shot of round.shots) {
-                if (!shot.position || shot.timestamp <= minTimestamp) continue;
-                const d = (shot.position.lat - shotFrom.lat) ** 2
-                        + (shot.position.lon - shotFrom.lon) ** 2;
-                if (d < bestDist) { bestDist = d; best = shot; }
-            }
-            if (!best) return;
-            minTimestamp = best.timestamp;
-
-            // Find the closest label index by timestamp
-            const shotUnix = best.timestamp + GARMIN_EPOCH;
-            let closestIdx = 0, closestDiff = Infinity;
-            pts.forEach((s, i) => {
-                const diff = Math.abs((s.timestamp + GARMIN_EPOCH) - shotUnix);
-                if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
+        if (round.shots?.length > 0) {
+            // Garmin path: match scorecard shots to activity shots by GPS proximity
+            let minTimestamp = -Infinity;
+            sortedHoles.forEach(hs => {
+                if (!hs.shots?.length) return;
+                const shotFrom = hs.shots[0].from;
+                let best = null, bestDist = Infinity;
+                for (const shot of round.shots) {
+                    if (!shot.position || shot.timestamp <= minTimestamp) continue;
+                    const d = (shot.position.lat - shotFrom.lat) ** 2
+                            + (shot.position.lon - shotFrom.lon) ** 2;
+                    if (d < bestDist) { bestDist = d; best = shot; }
+                }
+                if (!best) return;
+                minTimestamp = best.timestamp;
+                const shotUnix = best.timestamp + GARMIN_EPOCH;
+                let closestIdx = 0, closestDiff = Infinity;
+                pts.forEach((s, i) => {
+                    const diff = Math.abs((s.timestamp + GARMIN_EPOCH) - shotUnix);
+                    if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
+                });
+                activeHoleMarkers.push({ index: closestIdx, label: `H${hs.hole_number}` });
             });
-            activeHoleMarkers.push({ index: closestIdx, label: `H${hs.hole_number}` });
-        });
+        } else {
+            // iPhone path: use scorecard shot timestamps directly
+            sortedHoles.forEach(hs => {
+                if (!hs.shots?.length) return;
+                const ts = hs.shots[0].timestamp;
+                if (ts == null) return;
+                let closestIdx = 0, closestDiff = Infinity;
+                pts.forEach((s, i) => {
+                    const diff = Math.abs(s.timestamp - ts);
+                    if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
+                });
+                activeHoleMarkers.push({ index: closestIdx, label: `H${hs.hole_number}` });
+            });
+        }
     }
 
     // Inline plugin: hole markers + shot indicator
