@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
 import { t, getLang, initLangSelector } from './i18n.js';
+import maplibregl from 'maplibre-gl';
 
 const PAGE_SIZE = 10;
 
@@ -500,6 +501,7 @@ function renderTimelineChart(round) {
             // Shot indicator — yellow diamond
             if (shotIndicatorIdx !== null) {
                 const xPos = x.getPixelForValue(shotIndicatorIdx);
+                console.log('Drawing shot indicator, shotIndicatorIdx:', shotIndicatorIdx, 'xPos:', xPos, 'x.left:', x.left, 'x.right:', x.right);
                 if (xPos >= x.left && xPos <= x.right) {
                     ctx.save();
                     ctx.beginPath();
@@ -517,14 +519,20 @@ function renderTimelineChart(round) {
                     ctx.closePath();
                     ctx.fill();
                     ctx.restore();
+                } else {
+                    console.log('xPos out of bounds!');
                 }
             }
         }
     };
     // Expose so showShotOnTimeline can trigger a redraw
     window._setShotIndicator = (idx) => {
+        console.log('_setShotIndicator called with idx:', idx, 'activeChart exists:', !!activeChart);
         shotIndicatorIdx = idx;
-        if (activeChart) activeChart.draw();
+        if (activeChart) {
+            console.log('Calling activeChart.update(), shotIndicatorIdx is now:', shotIndicatorIdx);
+            activeChart.update('none'); // 'none' mode updates plugin hooks without animation
+        }
     };
 
     activeChart = new Chart(canvas, {
@@ -623,14 +631,18 @@ function renderTimelineChart(round) {
 }
 
 // Show a shot's position on the timeline chart as a yellow indicator.
-function showShotOnTimeline(shot) {
-    if (!shot.timestamp || !activeTimelinePts.length) return;
-    let closestIdx = 0, closestDiff = Infinity;
-    activeTimelinePts.forEach((s, i) => {
-        const diff = Math.abs(s.timestamp - shot.timestamp);
-        if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
-    });
-    if (window._setShotIndicator) window._setShotIndicator(closestIdx);
+function showShotOnTimeline(timelineIdx) {
+    console.log('showShotOnTimeline called with timelineIdx:', timelineIdx, 'activeTimelinePtsLength:', activeTimelinePts.length);
+
+    if (timelineIdx === undefined || timelineIdx === null || !activeTimelinePts.length) {
+        console.log('Skipping: timelineIdx=', timelineIdx, 'pts=', activeTimelinePts.length);
+        return;
+    }
+
+    // Clamp to valid range
+    const validIdx = Math.max(0, Math.min(timelineIdx, activeTimelinePts.length - 1));
+    console.log('Setting shot indicator at index:', validIdx);
+    if (window._setShotIndicator) window._setShotIndicator(validIdx);
 }
 
 function clearShotIndicator() {
@@ -812,32 +824,44 @@ function buildShotMap(round) {
         </button>`).join('');
 
     return `
-    <div class="bg-white rounded-xl shadow-sm border p-6">
-        <div class="flex items-center justify-between mb-3">
-            <h3 class="text-lg font-semibold text-gray-700">${t('shotmap.title')}</h3>
-            <div class="flex items-center gap-2">
-                <span class="text-xs text-gray-400">${t('shotmap.hole')}</span>
-                <button class="hole-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border border-blue-600"
-                    data-hole="all">${t('shotmap.all')}</button>
-                ${holeButtons}
+    <div class="flex flex-col gap-4" style="height: calc(100vh - 200px)">
+        <!-- Header with hole buttons -->
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-gray-700">${t('shotmap.title')}</h3>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-400">${t('shotmap.hole')}</span>
+                    <button class="hole-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border border-blue-600"
+                        data-hole="all">${t('shotmap.all')}</button>
+                    ${holeButtons}
+                </div>
             </div>
         </div>
-        <div id="shot-map-wrapper">
-            <div id="shot-map"></div>
-        </div>
-        <div class="mt-3 flex items-center justify-between">
-            <div id="shot-legend" class="flex flex-wrap gap-3 text-xs text-gray-500"></div>
-            <button id="trail-toggle" class="px-3 py-1 text-xs rounded-full border border-gray-300
-                hover:bg-gray-50 transition flex items-center gap-1">
-                <span id="trail-icon">👣</span> ${t('shotmap.trail')}
-            </button>
-        </div>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('shotmap.timeline.title')}</h3>
-        <p class="text-xs text-gray-400 mb-4">${t('shotmap.timeline.desc')}</p>
-        <div class="relative" style="height:240px">
-            <canvas id="timeline-chart"></canvas>
+
+        <!-- Map and Timeline split layout -->
+        <div class="flex gap-4 flex-1 min-h-0">
+            <!-- Left: Map -->
+            <div class="bg-white rounded-xl shadow-sm border p-4 flex flex-col flex-1">
+                <div id="shot-map-wrapper" class="flex-1 mb-3">
+                    <div id="shot-map"></div>
+                </div>
+                <div class="flex items-center justify-between pt-3 border-t">
+                    <div id="shot-legend" class="flex flex-wrap gap-3 text-xs text-gray-500"></div>
+                    <button id="trail-toggle" class="px-3 py-1 text-xs rounded-full border border-gray-300
+                        hover:bg-gray-50 transition flex items-center gap-1">
+                        <span id="trail-icon">👣</span> ${t('shotmap.trail')}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right: Timeline -->
+            <div class="bg-white rounded-xl shadow-sm border p-4 flex flex-col flex-1">
+                <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('shotmap.timeline.title')}</h3>
+                <p class="text-xs text-gray-400 mb-4">${t('shotmap.timeline.desc')}</p>
+                <div class="relative flex-1 min-h-0">
+                    <canvas id="timeline-chart"></canvas>
+                </div>
+            </div>
         </div>
     </div>`;
 }
@@ -916,14 +940,17 @@ function renderShotMap(round) {
     const mapEl = document.getElementById('shot-map');
     if (!mapEl) return;
 
-    // Destroy previous map instance
-    if (activeMap) { activeMap.remove(); activeMap = null; }
-
     const sc = round.scorecard;
     if (!sc?.hole_scores?.length) {
         mapEl.innerHTML = `<p class="text-gray-400 text-sm text-center py-8">${t('shotmap.nodata')}</p>`;
         return;
     }
+
+    // Build timeline first so activeTimelinePts is available for shot features
+    renderTimelineChart(round);
+
+    // Destroy previous map instance
+    if (activeMap) { activeMap.remove(); activeMap = null; }
 
     // Collect all shot positions to compute map bounds
     const allShots = sc.hole_scores.flatMap(hs =>
@@ -934,35 +961,58 @@ function renderShotMap(round) {
     const lats = allShots.flatMap(s => [s.from.lat, s.to.lat]);
     const lons = allShots.flatMap(s => [s.from.lon, s.to.lon]);
     const bounds = [
-        [Math.min(...lats), Math.min(...lons)],
-        [Math.max(...lats), Math.max(...lons)],
+        [Math.min(...lons), Math.min(...lats)],
+        [Math.max(...lons), Math.max(...lats)],
     ];
 
-    // Init Leaflet map — scroll zoom disabled, only +/- buttons
-    activeMap = L.map('shot-map', {
-        scrollWheelZoom: false,
+    // Init Maplibre map with OSM tiles
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+
+    activeMap = new maplibregl.Map({
+        container: 'shot-map',
+        style: {
+            version: 8,
+            glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+            sources: {
+                osm: {
+                    type: 'raster',
+                    tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                    tileSize: 256,
+                    attribution: '© OpenStreetMap contributors',
+                    maxzoom: 19,
+                }
+            },
+            layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+        },
+        center: [centerLon, centerLat],
+        zoom: 13,
+        scrollZoom: false,
         doubleClickZoom: false,
         touchZoom: false,
-    }).fitBounds(bounds, { padding: [30, 30] });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19,
-        maxNativeZoom: 19,
-    }).addTo(activeMap);
-
-    // Invalidate map size on window resize to maintain aspect ratio
-    const resizeObserver = new ResizeObserver(() => activeMap?.invalidateSize());
-    resizeObserver.observe(document.getElementById('shot-map-wrapper'));
-
-    // Layer groups per hole for filtering
-    const holeLayers = {};
-    const holeLabelLayers = {}; // club abbr + distance labels, shown only when zoomed to a hole
-    sc.hole_scores.forEach(hs => {
-        holeLayers[hs.hole_number] = L.layerGroup().addTo(activeMap);
-        holeLabelLayers[hs.hole_number] = L.layerGroup(); // not added yet
+        attributionControl: false
     });
 
-    // Club abbreviation helper
+    // Resize map on container resize
+    const resizeObserver = new ResizeObserver(() => activeMap?.resize?.());
+    resizeObserver.observe(document.getElementById('shot-map-wrapper'));
+
+    // Layer groups per hole — track layer IDs for visibility toggling
+    const holeLayers = {};
+    const holeLabelLayers = {};
+    const allLayerIds = new Set();
+    sc.hole_scores.forEach(hs => {
+        holeLayers[hs.hole_number] = [];
+        holeLabelLayers[hs.hole_number] = [];
+    });
+
+    // All source/layer creation and interactions happen after map loads
+    activeMap.on('load', () => {
+        console.log('Map loaded, building shot visualizations. allShots count:', allShots.length);
+        activeMap.fitBounds(bounds, { padding: [30, 30], duration: 0 });
+        console.log('fitBounds completed, now building features');
+
+        // Club abbreviation helper
     function clubAbbr(shot) {
         const name = shot.club_name ?? '';
         const cat  = shot.club_category ?? '';
@@ -981,66 +1031,118 @@ function renderShotMap(round) {
         return name.slice(0, 2);
     }
 
-    // Draw shots (including putts)
-    // Build per-hole shot index for putt count lookup
+    // Draw shots — build Maplibre sources and layers
     const holePutts = {};
     sc.hole_scores.forEach(hs => { holePutts[hs.hole_number] = hs.putts; });
 
-    // Pre-compute SG lookup for shot popups
-    const sgLookup = buildSgLookup(round);
-    const holeShotIdx = {}; // track per-hole shot index for SG key
 
-    // Pre-compute hole bearing (tee→green) per hole — matches Course Stats deviation calc
+    console.log('Building SG lookup...');
+    const sgLookup = buildSgLookup(round);
+    console.log('SG lookup built');
+    const holeShotIdx = {};
+
+    console.log('Computing hole bearings...');
     const holeBearings = {};
     sc.hole_scores.forEach(hs => {
         if (!hs.shots.length) return;
         holeBearings[hs.hole_number] = bearing(hs.shots[0].from, hs.shots[hs.shots.length - 1].to);
     });
+    console.log('Hole bearings computed. Starting feature loop...');
 
-    allShots.forEach((shot, idx) => {
-        const layer = holeLayers[shot.hole_number];
-        if (!layer) return;
+    // Build GeoJSON features for each hole
+    const shotLines = {}; // polylines per hole
+    const shotOrigins = {}; // origin circles per hole
+    const shotDests = {}; // destination circles per hole
+    const shotLabels = {}; // club + distance labels per hole
 
-        const cat    = shot.club_category ?? 'unknown';
-        const color  = CLUB_COLORS[cat] ?? CLUB_COLORS.unknown;
-        const club   = shot.club_name ?? (cat === 'putt' ? 'Putter' : cat);
-        const dist   = shot.distance_meters ? `${Math.round(shot.distance_meters * 1.09361)}yds` : '';
-        const hr     = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
-        const alt    = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
-        const isPutt = cat === 'putt';
+    // Build a map of GPS positions to closest timeline index for faster lookup
+    const posToTimelineIdx = {};
+    if (round.shots?.length > 0) {
+        // Garmin: map activity shot positions to closest health timeline point
+        round.shots.forEach(actShot => {
+            if (!actShot.position || !actShot.timestamp) return;
+            let closestIdx = 0, closestDiff = Infinity;
+            activeTimelinePts.forEach((s, i) => {
+                const diff = Math.abs((s.timestamp + GARMIN_EPOCH) - (actShot.timestamp + GARMIN_EPOCH));
+                if (diff < closestDiff) { closestDiff = diff; closestIdx = i; }
+            });
+            const key = `${actShot.position.lat.toFixed(6)},${actShot.position.lon.toFixed(6)}`;
+            posToTimelineIdx[key] = closestIdx;
+        });
+    }
 
-        // Line: dashed + thinner for putts, solid arrow for other shots
-        const line = L.polyline(
-            [[shot.from.lat, shot.from.lon], [shot.to.lat, shot.to.lon]],
-            { color, weight: isPutt ? 1.5 : 2.5, opacity: 0.85,
-              dashArray: isPutt ? '4 4' : null }
-        ).addTo(layer);
+    try {
+        allShots.forEach((shot, idx) => {
+            if (idx === 0) console.log('Processing first shot...');
+            const hole = String(shot.hole_number);
+            const cat = shot.club_category ?? 'unknown';
+            const color = CLUB_COLORS[cat] ?? CLUB_COLORS.unknown;
+            const club = shot.club_name ?? (cat === 'putt' ? 'Putter' : cat);
+            const isPutt = cat === 'putt';
+            const shotNum = idx + 1;
 
-        // Circle at shot origin: smaller for putts
-        const shotNum = idx + 1;
-        const circle = L.circleMarker([shot.from.lat, shot.from.lon], {
-            radius: isPutt ? 4 : 6,
-            color: 'white', weight: 1.5,
-            fillColor: color, fillOpacity: 1,
-        }).addTo(layer);
+            // Find closest timeline index for this shot
+            let timelineIdx = null;
+            if (round.shots?.length > 0) {
+                // Try to find matching activity shot by position proximity
+                let bestDist = Infinity, bestIdx = null;
+                for (const actShot of round.shots) {
+                    if (!actShot.position) continue;
+                    const d = (actShot.position.lat - shot.from.lat) ** 2
+                            + (actShot.position.lon - shot.from.lon) ** 2;
+                    if (d < bestDist) { bestDist = d; bestIdx = actShot; }
+                }
+                if (bestIdx && bestDist < 0.0001) { // ~10m threshold
+                    const key = `${bestIdx.position.lat.toFixed(6)},${bestIdx.position.lon.toFixed(6)}`;
+                    timelineIdx = posToTimelineIdx[key];
+                }
+            } else {
+                // iPhone: estimate timeline index based on shot order within hole
+                // Find all shots for this hole and estimate position in timeline
+                const holeShots = sc.hole_scores.find(hs => hs.hole_number === parseInt(hole))?.shots ?? [];
+                const shotOrderInHole = holeShots.findIndex(s => s.from.lat === shot.from.lat && s.from.lon === shot.from.lon);
+                if (shotOrderInHole >= 0 && activeHoleMarkers.length > 0) {
+                    const holeMarker = activeHoleMarkers.find(m => m.label === `H${hole}`);
+                    if (holeMarker) {
+                        // Estimate: spread shots evenly within the hole's timeline window
+                        const holeIdx = activeHoleMarkers.findIndex(m => m.label === `H${hole}`);
+                        const nextHoleIdx = holeIdx + 1 < activeHoleMarkers.length
+                            ? activeHoleMarkers[holeIdx + 1].index
+                            : activeChart.data.labels.length - 1;
+                        const holeWindow = nextHoleIdx - holeMarker.index;
+                        const spread = Math.max(1, Math.floor(holeWindow / (holeShots.length + 1)));
+                        timelineIdx = holeMarker.index + (shotOrderInHole + 1) * spread;
+                    }
+                }
+            }
 
-        // Direction arrow for non-putt shots — deviation from hole bearing (tee→green)
+            // Initialize feature arrays for this hole
+            if (!shotLines[hole]) {
+                shotLines[hole] = [];
+                shotOrigins[hole] = [];
+                shotDests[hole] = [];
+                shotLabels[hole] = [];
+            }
+            if (idx === 0) console.log('First shot initialized');
+
+        // Build popup content
+        const shotIdxInHole = holeShotIdx[hole] ?? 0;
+        holeShotIdx[hole] = shotIdxInHole + 1;
+        const dist = shot.distance_meters ? `${Math.round(shot.distance_meters * 1.09361)}yds` : '';
+        const hr = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
+        const alt = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
+        const sgVal = sgLookup[`${hole}-${shotIdxInHole}`];
         let dirHtml = '';
-        if (!isPutt && holeBearings[shot.hole_number] != null) {
+        if (!isPutt && holeBearings[hole] != null) {
             const shotBear = bearing(shot.from, shot.to);
-            dirHtml = dirArrowSvg(deviation(shotBear, holeBearings[shot.hole_number]));
+            dirHtml = dirArrowSvg(deviation(shotBear, holeBearings[hole]));
         }
-
-        // Popup content — 2-column layout
-        const shotIdxInHole = holeShotIdx[shot.hole_number] ?? 0;
-        holeShotIdx[shot.hole_number] = shotIdxInHole + 1;
-        const sgVal = sgLookup[`${shot.hole_number}-${shotIdxInHole}`];
         const spark = hr ? hrSparkline(shot, round.health_timeline) : '';
         const leftLines = [
-            `<b>H${shot.hole_number} ${isPutt ? 'Putt' : `Shot ${shotNum}`}</b>`,
+            `<b>H${hole} ${isPutt ? 'Putt' : `Shot ${shotNum}`}</b>`,
             `Club: ${club}`,
             dist ? `Dist: ${dist}` : null,
-            isPutt ? `Putts: ${holePutts[shot.hole_number] ?? '?'}` : null,
+            isPutt ? `Putts: ${holePutts[hole] ?? '?'}` : null,
             alt ? `Alt: ${alt}` : null,
             shot.swing_tempo != null ? `Tempo: ${shot.swing_tempo.toFixed(1)}:1` : null,
             sgVal != null ? `SG: ${sgBadge(sgVal)}` : null,
@@ -1053,137 +1155,229 @@ function renderShotMap(round) {
                </div>`
             : `<div style="font-size:12px;line-height:1.6">${leftLines}</div>`;
 
-        const popup = L.popup({ closeButton: false, offset: [0, -4], autoPan: false, maxWidth: 300 }).setContent(popupHtml);
-        circle.bindPopup(popup);
-        line.bindPopup(popup);
+        // Polyline (shot trajectory)
+        shotLines[hole].push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: [[shot.from.lon, shot.from.lat], [shot.to.lon, shot.to.lat]] },
+            properties: { color, isPutt, popupHtml, timelineIdx }
+        });
 
-        // Hover: open popup + show timeline indicator; mouseout: close + clear
-        const onOver = () => { circle.openPopup(); showShotOnTimeline(shot); };
-        const onOut  = () => { circle.closePopup(); clearShotIndicator(); };
-        circle.on('mouseover', onOver).on('mouseout', onOut);
-        line.on('mouseover', () => { line.openPopup(); showShotOnTimeline(shot); })
-            .on('mouseout', onOut);
+        // Origin circle
+        shotOrigins[hole].push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [shot.from.lon, shot.from.lat] },
+            properties: { color, isPutt, popupHtml, timelineIdx }
+        });
 
-        // Arrowhead dot at destination (skip for putts — destination is the hole)
+        // Destination circle (skip for putts)
         if (!isPutt) {
-            L.circleMarker([shot.to.lat, shot.to.lon], {
-                radius: 3, color, weight: 0,
-                fillColor: color, fillOpacity: 0.6,
-            }).addTo(layer);
+            shotDests[hole].push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [shot.to.lon, shot.to.lat] },
+                properties: { color, isPutt }
+            });
         }
 
-        // Club abbr label next to origin dot
+        // Labels (club abbr + distance)
         const abbr = clubAbbr(shot);
-        const labelLayer = holeLabelLayers[shot.hole_number];
-        if (labelLayer) {
-            const abbrMarker = L.marker([shot.from.lat, shot.from.lon], {
-                icon: L.divIcon({
-                    className: '',
-                    html: `<div style="font-size:12px;font-weight:700;color:${color};
-                        background:rgba(255,255,255,0.9);border-radius:3px;
-                        padding:1px 3px;white-space:nowrap;
-                        text-shadow:0 0 2px white;line-height:1.4;cursor:pointer">${abbr}</div>`,
-                    iconSize: [30, 18], iconAnchor: [-7, 9],
-                }),
-            }).addTo(labelLayer);
-            abbrMarker.bindPopup(popup);
-            abbrMarker.on('mouseover', onOver).on('mouseout', onOut);
+        shotLabels[hole].push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [shot.from.lon, shot.from.lat] },
+            properties: { label: abbr, color, isPutt, popupHtml, timelineIdx }
+        });
 
-            // Distance label at midpoint of line
-            if (!isPutt && shot.distance_meters) {
-                const mid = [
-                    (shot.from.lat + shot.to.lat) / 2,
-                    (shot.from.lon + shot.to.lon) / 2,
-                ];
-                const yds = Math.round(shot.distance_meters * 1.09361);
-                const distMarker = L.marker(mid, {
-                    icon: L.divIcon({
-                        className: '',
-                        html: `<div style="font-size:11px;color:#111827;
-                            background:rgba(255,255,255,0.9);border-radius:3px;
-                            padding:1px 3px;white-space:nowrap;
-                            line-height:1.4;cursor:pointer">${yds}y</div>`,
-                        iconSize: [34, 16], iconAnchor: [17, 8],
-                    }),
-                }).addTo(labelLayer);
-                distMarker.bindPopup(popup);
-                distMarker.on('mouseover', onOver).on('mouseout', onOut);
+        if (!isPutt && shot.distance_meters) {
+            const mid = [(shot.from.lon + shot.to.lon) / 2, (shot.from.lat + shot.to.lat) / 2];
+            const yds = Math.round(shot.distance_meters * 1.09361);
+            shotLabels[hole].push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: mid },
+                properties: { label: `${yds}y`, color: '#111827', isPutt, popupHtml, timelineIdx }
+            });
+            }
+        });
+    } catch (err) {
+        console.error('Error building shot features:', err.message, err.stack);
+    }
+
+    console.log('Feature building complete. shotLines holes:', Object.keys(shotLines), 'total allShots:', allShots.length);
+
+    // Create Maplibre sources and layers for each hole
+    console.log('Creating sources/layers for holes:', Object.keys(shotLines));
+    Object.entries(shotLines).forEach(([hole, features]) => {
+        console.log(`Adding layer for hole ${hole}, features:`, features.length);
+        // Polylines
+        activeMap.addSource(`lines-${hole}`, { type: 'geojson', data: { type: 'FeatureCollection', features } });
+        activeMap.addLayer({
+            id: `lines-${hole}`,
+            type: 'line',
+            source: `lines-${hole}`,
+            paint: {
+                'line-color': ['get', 'color'],
+                'line-width': ['case', ['get', 'isPutt'], 1.5, 2.5],
+                'line-opacity': 0.85
+            },
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            }
+        });
+        // Set dasharray per feature after layer is added
+        if (features.some(f => f.properties.isPutt)) {
+            activeMap.setPaintProperty(`lines-${hole}`, 'line-dasharray', ['case', ['get', 'isPutt'], ['literal', [4, 4]], ['literal', []]]);
+        }
+        holeLayers[hole].push(`lines-${hole}`);
+        allLayerIds.add(`lines-${hole}`);
+
+        // Origins (large circles with white stroke to fit club abbreviations)
+        activeMap.addSource(`origins-${hole}`, { type: 'geojson', data: { type: 'FeatureCollection', features: shotOrigins[hole] } });
+        activeMap.addLayer({
+            id: `origins-${hole}`,
+            type: 'circle',
+            source: `origins-${hole}`,
+            paint: {
+                'circle-radius': ['case', ['get', 'isPutt'], 10, 14],
+                'circle-color': ['get', 'color'],
+                'circle-stroke-color': 'white',
+                'circle-stroke-width': 2.5
+            }
+        });
+        holeLayers[hole].push(`origins-${hole}`);
+        allLayerIds.add(`origins-${hole}`);
+
+
+        // Club abbreviation labels (centered on shot circles)
+        if (shotLabels[hole]?.length) {
+            const clubLabels = shotLabels[hole].filter(f => !/^\d+y$/.test(f.properties.label));
+            if (clubLabels.length) {
+                activeMap.addSource(`club-labels-${hole}`, { type: 'geojson', data: { type: 'FeatureCollection', features: clubLabels } });
+                activeMap.addLayer({
+                    id: `club-labels-${hole}`,
+                    type: 'symbol',
+                    source: `club-labels-${hole}`,
+                    layout: {
+                        'text-field': ['get', 'label'],
+                        'text-size': 14,
+                        'text-offset': [0, 0],
+                        'text-allow-overlap': true
+                    },
+                    paint: {
+                        'text-color': '#fff'
+                    }
+                });
+                holeLabelLayers[hole].push(`club-labels-${hole}`);
+                allLayerIds.add(`club-labels-${hole}`);
+            }
+
+            // Distance labels (below shots)
+            const distLabels = shotLabels[hole].filter(f => /^\d+y$/.test(f.properties.label));
+            if (distLabels.length) {
+                activeMap.addSource(`dist-labels-${hole}`, { type: 'geojson', data: { type: 'FeatureCollection', features: distLabels } });
+                activeMap.addLayer({
+                    id: `dist-labels-${hole}`,
+                    type: 'symbol',
+                    source: `dist-labels-${hole}`,
+                    layout: {
+                        'text-field': ['get', 'label'],
+                        'text-size': 12,
+                        'text-offset': [0, 1.5],
+                        'text-allow-overlap': false
+                    },
+                    paint: {
+                        'text-color': '#111827',
+                        'text-halo-color': '#fff',
+                        'text-halo-width': 1
+                    }
+                });
+                holeLabelLayers[hole].push(`dist-labels-${hole}`);
+                allLayerIds.add(`dist-labels-${hole}`);
             }
         }
     });
 
-    // Hole number circles at tee positions — hover shows score + putts
-    const holeScoreMap = {};
-    sc.hole_scores.forEach(hs => { holeScoreMap[hs.hole_number] = hs; });
-
-    sc.hole_definitions.forEach(hd => {
-        if (!hd.tee_position) return;
-        const hs  = holeScoreMap[hd.hole_number];
-        const par = hd.par;
-        const score = hs?.score;
-        const putts = hs?.putts;
-        const diff  = score != null ? score - par : null;
-        const diffStr = diff === 0 ? 'E' : diff > 0 ? `+${diff}` : `${diff}`;
-        const distYds = hd.distance_cm ? Math.round(hd.distance_cm / 91.44) : null;
-
-        const popupHtml = `
-            <div style="min-width:120px">
-                <b>Hole ${hd.hole_number}</b><br>
-                Par ${par}${distYds ? ` · ${distYds} yds` : ''}<br>
-                ${score != null ? `Score: <b>${score}</b> (${diffStr})<br>` : ''}
-                ${putts != null ? `Putts: <b>${putts}</b>` : ''}
-            </div>`;
-
-        const marker = L.marker([hd.tee_position.lat, hd.tee_position.lon], {
-            icon: L.divIcon({
-                className: '',
-                html: `<div style="display:flex;align-items:center;gap:3px;pointer-events:none">
-                    <div style="background:#1e40af;color:white;border-radius:50%;
-                        width:20px;height:20px;display:flex;align-items:center;
-                        justify-content:center;font-size:10px;font-weight:700;
-                        border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4);
-                        flex-shrink:0">${hd.hole_number}</div>
-                    ${putts != null ? `<div style="font-size:11px;font-weight:600;color:#1e40af;
-                        background:rgba(255,255,255,0.9);border-radius:3px;
-                        padding:1px 4px;white-space:nowrap">${putts} putts</div>` : ''}
-                </div>`,
-                iconSize: [90, 20], iconAnchor: [10, 10],
-            })
-        }).addTo(activeMap);
-
-        const holePopup = L.popup({ closeButton: false, autoPan: false }).setContent(popupHtml);
-        marker.bindPopup(holePopup);
-        marker.on('mouseover', () => marker.openPopup());
-        marker.on('mouseout',  () => marker.closePopup());
+    // Attach popup handlers to all layers
+    allLayerIds.forEach(layerId => {
+        activeMap.on('click', layerId, (e) => {
+            if (e.features?.[0]?.properties?.popupHtml) {
+                const popup = new maplibregl.Popup({ closeButton: false, maxWidth: 300 })
+                    .setLngLat(e.lngLat)
+                    .setHTML(e.features[0].properties.popupHtml)
+                    .addTo(activeMap);
+                // Clear shot indicator when popup closes
+                popup.on('close', clearShotIndicator);
+                // Show shot timing line on timeline when popup opens
+                if (e.features[0].properties.timelineIdx !== undefined && e.features[0].properties.timelineIdx !== null) {
+                    showShotOnTimeline(e.features[0].properties.timelineIdx);
+                }
+            }
+        });
+        activeMap.on('mouseenter', layerId, (e) => {
+            activeMap.getCanvas().style.cursor = 'pointer';
+            if (e?.features?.[0]?.properties?.timelineIdx !== undefined && e?.features?.[0]?.properties?.timelineIdx !== null) {
+                showShotOnTimeline(e.features[0].properties.timelineIdx);
+            }
+        });
+        activeMap.on('mouseleave', layerId, () => {
+            activeMap.getCanvas().style.cursor = '';
+            clearShotIndicator();
+        });
     });
 
-    // Putt count markers at green (last shot destination per hole)
+
+    // Putt count text at green
+    const puttLabels = [];
     sc.hole_scores.forEach(hs => {
         if (!hs.shots.length || !hs.putts) return;
         const lastShot = hs.shots[hs.shots.length - 1];
         const greenPos = lastShot.to;
         if (!greenPos || (greenPos.lat === lastShot.from.lat && greenPos.lon === lastShot.from.lon)) return;
-        const layer = holeLayers[hs.hole_number];
-        if (!layer) return;
         const label = hs.putts === 1 ? '1 putt' : `${hs.putts} putts`;
-        L.marker([greenPos.lat, greenPos.lon], {
-            icon: L.divIcon({
-                className: '',
-                html: `<div style="background:#16a34a;color:white;font-size:10px;font-weight:700;
-                    border-radius:14px;padding:2px 7px;white-space:nowrap;
-                    border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3)">${label}</div>`,
-                iconSize: [60, 20], iconAnchor: [30, 10],
-            })
-        }).addTo(layer);
+        puttLabels.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [greenPos.lon, greenPos.lat] },
+            properties: { label }
+        });
     });
+
+    if (puttLabels.length) {
+        activeMap.addSource('putt-labels', { type: 'geojson', data: { type: 'FeatureCollection', features: puttLabels } });
+        activeMap.addLayer({
+            id: 'putt-labels',
+            type: 'symbol',
+            source: 'putt-labels',
+            layout: {
+                'text-field': ['get', 'label'],
+                'text-size': 14,
+                'text-offset': [0, -1.5],
+                'text-allow-overlap': true
+            },
+            paint: {
+                'text-color': '#1f2937',
+                'text-halo-color': '#fff',
+                'text-halo-width': 1
+            }
+        });
+    }
 
     // GPS trail layer from health_timeline
     const trailPts = round.health_timeline
         .filter(s => s.position?.lat && s.position?.lon)
-        .map(s => [s.position.lat, s.position.lon]);
-    const trailLayer = trailPts.length > 1
-        ? L.polyline(trailPts, { color: '#6366f1', weight: 2, opacity: 0.5, dashArray: '4 4' })
-        : null;
+        .map(s => [s.position.lon, s.position.lat]);
+    const hasTrail = trailPts.length > 1;
+    if (hasTrail) {
+        activeMap.addSource('trail', {
+            type: 'geojson',
+            data: { type: 'Feature', geometry: { type: 'LineString', coordinates: trailPts } }
+        });
+        activeMap.addLayer({
+            id: 'trail',
+            type: 'line',
+            source: 'trail',
+            paint: { 'line-color': '#6366f1', 'line-width': 2, 'line-opacity': 0.5, 'line-dasharray': [4, 4] },
+            layout: { 'line-join': 'round', 'line-cap': 'round' }
+        });
+        activeMap.setLayoutProperty('trail', 'visibility', 'none');
+    }
 
     // Legend
     const usedCats = [...new Set(allShots.map(s => s.club_category ?? 'unknown'))];
@@ -1199,28 +1393,65 @@ function renderShotMap(round) {
     // Trail toggle
     let trailVisible = false;
     const trailBtn = document.getElementById('trail-toggle');
-    if (trailBtn && trailLayer) {
+    if (trailBtn && hasTrail) {
         trailBtn.addEventListener('click', () => {
             trailVisible = !trailVisible;
+            activeMap.setLayoutProperty('trail', 'visibility', trailVisible ? 'visible' : 'none');
             if (trailVisible) {
-                trailLayer.addTo(activeMap);
                 trailBtn.classList.add('bg-indigo-100', 'border-indigo-400', 'text-indigo-700');
                 trailBtn.classList.remove('border-gray-300');
             } else {
-                activeMap.removeLayer(trailLayer);
                 trailBtn.classList.remove('bg-indigo-100', 'border-indigo-400', 'text-indigo-700');
                 trailBtn.classList.add('border-gray-300');
             }
         });
-    } else if (trailBtn && !trailLayer) {
+    } else if (trailBtn && !hasTrail) {
         trailBtn.disabled = true;
         trailBtn.classList.add('opacity-40');
+    }
+
+    // Zoom to hole with rotation (tee→green bearing) — matching iOS implementation
+    function zoomToHole(hole, animated = true) {
+        if (hole === 'all') {
+            activeMap.fitBounds(bounds, { padding: [30, 30] });
+            activeMap.easeTo({ bearing: 0, duration: animated ? 1000 : 0 });
+            return;
+        }
+
+        const holeShots = allShots.filter(s => String(s.hole_number) === hole);
+        if (!holeShots.length) return;
+
+        // Get tee and green (first and last shots)
+        const firstShot = holeShots[0];
+        const lastShot = holeShots[holeShots.length - 1];
+        const tee = firstShot.from;
+        const green = lastShot.to;
+
+        // Center between tee and green (iOS approach)
+        const center = [(tee.lon + green.lon) / 2, (tee.lat + green.lat) / 2];
+
+        // Calculate altitude like iOS: max(distance * 3.5, 200)
+        const dist = distMeters(tee, green);
+        const altitude = Math.max(dist * 3.5, 200);
+
+        // Convert altitude to zoom: simpler direct mapping (zoomed in ~2.5 levels more than iOS)
+        // altitude ~200m → zoom ~19, altitude ~600m → zoom ~17.4, altitude ~2000m → zoom ~15.7
+        const zoom = 19 - Math.log2(altitude / 200);
+
+        // Bearing from tee to green
+        const bear = bearing(tee, green);
+
+        activeMap.easeTo({
+            center: center,
+            zoom: zoom,
+            bearing: bear,
+            duration: animated ? 1000 : 0
+        });
     }
 
     // Hole filter buttons
     document.querySelectorAll('.hole-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            // Update active button style
             document.querySelectorAll('.hole-btn').forEach(b => {
                 b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
                 b.classList.add('border-gray-300');
@@ -1230,46 +1461,31 @@ function renderShotMap(round) {
 
             const holeFilter = btn.dataset.hole;
 
-            // Show/hide shot layers
-            Object.entries(holeLayers).forEach(([holeNum, layer]) => {
-                if (holeFilter === 'all' || holeNum === holeFilter) {
-                    activeMap.addLayer(layer);
-                } else {
-                    activeMap.removeLayer(layer);
-                }
+            // Show/hide shot layers using visibility property
+            Object.entries(holeLayers).forEach(([holeNum, layerIds]) => {
+                const show = holeFilter === 'all' || holeNum === holeFilter;
+                layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
             });
 
             // Show labels only when a single hole is selected
-            Object.entries(holeLabelLayers).forEach(([holeNum, layer]) => {
-                if (holeFilter !== 'all' && holeNum === holeFilter) {
-                    activeMap.addLayer(layer);
-                } else {
-                    activeMap.removeLayer(layer);
-                }
+            Object.entries(holeLabelLayers).forEach(([holeNum, layerIds]) => {
+                const show = holeFilter !== 'all' && holeNum === holeFilter;
+                layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
             });
 
-            // Zoom map to selected hole or all
-            if (holeFilter === 'all') {
-                activeMap.fitBounds(bounds, { padding: [30, 30] });
-            } else {
-                const holeShots = allShots.filter(s => String(s.hole_number) === holeFilter);
-                if (holeShots.length) {
-                    const hlats = holeShots.flatMap(s => [s.from.lat, s.to.lat]);
-                    const hlons = holeShots.flatMap(s => [s.from.lon, s.to.lon]);
-                    activeMap.fitBounds([
-                        [Math.min(...hlats), Math.min(...hlons)],
-                        [Math.max(...hlats), Math.max(...hlons)],
-                    ], { padding: [20, 20], maxZoom: 19 });
-                }
-            }
+            // Zoom with bearing (tee→green rotation)
+            zoomToHole(holeFilter, true);
 
             // Zoom timeline chart to hole time window
             zoomTimeline(holeFilter);
         });
-    });
+        });
+    }); // END activeMap.on('load')
 
-    // Render timeline chart below the map
-    requestAnimationFrame(() => renderTimelineChart(round));
+    // Ensure map properly sizes itself after layout changes
+    requestAnimationFrame(() => {
+        activeMap.resize();
+    });
 }
 
 // ── Course Stats ─────────────────────────────────────────────────────────────
