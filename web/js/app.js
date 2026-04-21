@@ -1012,7 +1012,7 @@ function renderShotMap(round) {
         activeMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
         console.log('Map loaded, building shot visualizations. allShots count:', allShots.length);
-        activeMap.fitBounds(bounds, { padding: [30, 30], duration: 0 });
+        activeMap.fitBounds(bounds, { padding: 70, duration: 0 });
         console.log('fitBounds completed, now building features');
 
         // Club abbreviation helper
