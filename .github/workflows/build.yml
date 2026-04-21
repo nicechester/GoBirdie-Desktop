@@ -1,4 +1,4 @@
-name: Build Garmin Analyzer
+name: Build GoBirdie Desktop
 
 on:
   push:

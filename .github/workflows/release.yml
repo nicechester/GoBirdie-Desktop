@@ -1,4 +1,4 @@
-name: Release Garmin Analyzer
+name: Release GoBirdie Desktop
 
 on:
   push:
