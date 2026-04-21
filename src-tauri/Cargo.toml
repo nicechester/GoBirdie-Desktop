@@ -3,7 +3,7 @@ name = "go-birdie-desktop"
 version = "2.0.1"
 description = "Go Birdie Desktop — golf round analyzer"
 authors = ["Chester Kim"]
-edition = "2026"
+edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
