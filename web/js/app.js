@@ -1008,6 +1008,9 @@ function renderShotMap(round) {
 
     // All source/layer creation and interactions happen after map loads
     activeMap.on('load', () => {
+        // Add zoom controls
+        activeMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
         console.log('Map loaded, building shot visualizations. allShots count:', allShots.length);
         activeMap.fitBounds(bounds, { padding: [30, 30], duration: 0 });
         console.log('fitBounds completed, now building features');
@@ -1323,6 +1326,29 @@ function renderShotMap(round) {
         });
     });
 
+    // Create "all" mode layer with small circles for all shots
+    const allShotsFeatures = allShots.map(shot => {
+        const cat = shot.club_category ?? 'unknown';
+        const color = CLUB_COLORS[cat] ?? CLUB_COLORS.unknown;
+        return {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [shot.from.lon, shot.from.lat] },
+            properties: { color }
+        };
+    });
+
+    activeMap.addSource('all-shots', { type: 'geojson', data: { type: 'FeatureCollection', features: allShotsFeatures } });
+    activeMap.addLayer({
+        id: 'all-shots',
+        type: 'circle',
+        source: 'all-shots',
+        paint: {
+            'circle-radius': 3,
+            'circle-color': ['get', 'color'],
+            'circle-opacity': 0.8
+        }
+    });
+    allLayerIds.add('all-shots');
 
     // Putt count text at green
     const puttLabels = [];
@@ -1413,8 +1439,7 @@ function renderShotMap(round) {
     // Zoom to hole with rotation (tee→green bearing) — matching iOS implementation
     function zoomToHole(hole, animated = true) {
         if (hole === 'all') {
-            activeMap.fitBounds(bounds, { padding: [30, 30] });
-            activeMap.easeTo({ bearing: 0, duration: animated ? 1000 : 0 });
+            activeMap.fitBounds(bounds, { padding: 100, duration: animated ? 1000 : 0 });
             return;
         }
 
@@ -1461,17 +1486,33 @@ function renderShotMap(round) {
 
             const holeFilter = btn.dataset.hole;
 
-            // Show/hide shot layers using visibility property
-            Object.entries(holeLayers).forEach(([holeNum, layerIds]) => {
-                const show = holeFilter === 'all' || holeNum === holeFilter;
-                layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
-            });
-
-            // Show labels only when a single hole is selected
-            Object.entries(holeLabelLayers).forEach(([holeNum, layerIds]) => {
-                const show = holeFilter !== 'all' && holeNum === holeFilter;
-                layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
-            });
+            if (holeFilter === 'all') {
+                // "all" mode: show only small shot circles, hide per-hole layers
+                Object.entries(holeLayers).forEach(([holeNum, layerIds]) => {
+                    layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', 'none'));
+                });
+                Object.entries(holeLabelLayers).forEach(([holeNum, layerIds]) => {
+                    layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', 'none'));
+                });
+                activeMap.setLayoutProperty('all-shots', 'visibility', 'visible');
+                if (activeMap.getLayer('putt-labels')) {
+                    activeMap.setLayoutProperty('putt-labels', 'visibility', 'none');
+                }
+            } else {
+                // Individual hole mode: show per-hole layers, hide all-shots
+                Object.entries(holeLayers).forEach(([holeNum, layerIds]) => {
+                    const show = holeNum === holeFilter;
+                    layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
+                });
+                Object.entries(holeLabelLayers).forEach(([holeNum, layerIds]) => {
+                    const show = holeNum === holeFilter;
+                    layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
+                });
+                activeMap.setLayoutProperty('all-shots', 'visibility', 'none');
+                if (activeMap.getLayer('putt-labels')) {
+                    activeMap.setLayoutProperty('putt-labels', 'visibility', 'visible');
+                }
+            }
 
             // Zoom with bearing (tee→green rotation)
             zoomToHole(holeFilter, true);
@@ -1480,6 +1521,18 @@ function renderShotMap(round) {
             zoomTimeline(holeFilter);
         });
         });
+
+        // Initialize to "all" mode on map load
+        Object.entries(holeLayers).forEach(([holeNum, layerIds]) => {
+            layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', 'none'));
+        });
+        Object.entries(holeLabelLayers).forEach(([holeNum, layerIds]) => {
+            layerIds.forEach(id => activeMap.setLayoutProperty(id, 'visibility', 'none'));
+        });
+        activeMap.setLayoutProperty('all-shots', 'visibility', 'visible');
+        if (activeMap.getLayer('putt-labels')) {
+            activeMap.setLayoutProperty('putt-labels', 'visibility', 'none');
+        }
     }); // END activeMap.on('load')
 
     // Ensure map properly sizes itself after layout changes
