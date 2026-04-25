@@ -15,13 +15,16 @@ pub struct MtpEntry {
     pub clubs_path: String,
 }
 
-/// Kill Android File Transfer and download up to `count` rounds starting at `offset`.
+/// Download up to `count` rounds starting at `offset`.
 pub fn download_rounds(dest_dir: &Path, count: usize, offset: usize) -> Result<Vec<MtpEntry>, String> {
     std::fs::create_dir_all(dest_dir)
         .map_err(|e| format!("Cannot create dest dir: {}", e))?;
 
-    let _ = Command::new("pkill").arg("-f").arg("Android File Transfer").output();
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("pkill").arg("-f").arg("Android File Transfer").output();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 
     let binary = find_binary()?;
 
@@ -38,7 +41,6 @@ pub fn download_rounds(dest_dir: &Path, count: usize, offset: usize) -> Result<V
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Strip any libmtp diagnostic lines before the JSON array
     let json_start = stdout.find('[').ok_or("No JSON array in output")?;
     let json_str = &stdout[json_start..];
 
@@ -50,18 +52,22 @@ pub fn download_rounds(dest_dir: &Path, count: usize, offset: usize) -> Result<V
 
 fn find_binary() -> Result<PathBuf, String> {
     let native_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/native");
+
+    #[cfg(target_os = "windows")]
+    let binary_name = "garmin_mtp_windows";
+    #[cfg(not(target_os = "windows"))]
+    let binary_name = "garmin_mtp";
+
     let candidates = [
-        // bundled: next to the app executable (with arch suffix)
         std::env::current_exe().ok()
-            .and_then(|p| p.parent().map(|d| d.join(format!("garmin_mtp-{}", env!("TAURI_ENV_TARGET_TRIPLE"))))),
-        // dev: compiled with arch suffix in native dir
-        Some(native_dir.join(format!("garmin_mtp-{}", env!("TAURI_ENV_TARGET_TRIPLE")))),
-        // fallback: unsuffixed in native dir
-        Some(native_dir.join("garmin_mtp")),
-        Some(PathBuf::from("/usr/local/bin/garmin_mtp")),
+            .and_then(|p| p.parent().map(|d| d.join(format!("{}-{}", binary_name, env!("TAURI_ENV_TARGET_TRIPLE"))))),
+        Some(native_dir.join(format!("{}-{}", binary_name, env!("TAURI_ENV_TARGET_TRIPLE")))),
+        Some(native_dir.join(binary_name)),
+        #[cfg(not(target_os = "windows"))]
+        Some(PathBuf::from(format!("/usr/local/bin/{}", binary_name))),
     ];
     for candidate in candidates.into_iter().flatten() {
         if candidate.exists() { return Ok(candidate); }
     }
-    Err("garmin_mtp binary not found".into())
+    Err(format!("{} binary not found", binary_name))
 }

@@ -14,6 +14,7 @@ const state = {
     syncing: false,
     activeRound: null,
     settings: null,         // { player_name, device_source }
+    platform: 'unknown',    // "macos" | "windows" | "linux"
 };
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -48,6 +49,10 @@ async function syncAppleRounds() {
 
 async function syncAndroidRounds() {
     return invoke('sync_android_rounds');
+}
+
+async function getPlatform() {
+    return invoke('get_platform');
 }
 
 async function deleteRound(id) {
@@ -2841,7 +2846,7 @@ function renderSetupModal(isFirstRun) {
                         <div class="device-name">${t('setup.device.garmin')}</div>
                         <div class="device-desc">${t('setup.device.garmin.desc')}</div>
                     </div>
-                    <div class="device-option ${device === 'apple' ? 'selected' : ''}" data-device="apple">
+                    <div class="device-option ${device === 'apple' ? 'selected' : ''}" data-device="apple" ${state.platform === 'windows' ? 'style="display:none"' : ''}>
                         <div class="device-icon">⌚</div>
                         <div class="device-name">${t('setup.device.apple')}</div>
                         <div class="device-desc">${t('setup.device.apple.desc')}</div>
@@ -3042,6 +3047,7 @@ async function init() {
 
     // Check first-run: load settings
     try {
+        state.platform = await getPlatform().catch(() => 'unknown');
         const settings = await getSettings();
         if (!settings || !settings.device_source) {
             // First run — show setup modal, don't load data yet

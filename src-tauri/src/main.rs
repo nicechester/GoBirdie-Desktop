@@ -4,6 +4,7 @@ mod models;
 mod parser;
 mod store;
 mod mtp;
+#[cfg(not(target_os = "windows"))]
 mod apple_sync;
 mod android_sync;
 
@@ -188,6 +189,7 @@ fn delete_round(id: String, state: State<'_, AppState>) -> Result<bool, String> 
     state.store.lock().unwrap().delete_by_id(&id)
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tauri::command]
 async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
     let list = apple_sync::fetch_round_list()?;
@@ -209,6 +211,19 @@ async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummar
     }
 
     Ok(new_summaries)
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn sync_apple_rounds() -> Result<Vec<RoundSummary>, String> {
+    Err("iPhone sync is not available on Windows".into())
+}
+
+#[tauri::command]
+fn get_platform() -> &'static str {
+    #[cfg(target_os = "windows")] { "windows" }
+    #[cfg(target_os = "macos")] { "macos" }
+    #[cfg(target_os = "linux")] { "linux" }
 }
 
 #[tauri::command]
@@ -280,6 +295,7 @@ fn main() {
             get_clubs,
             get_settings,
             save_settings,
+            get_platform,
             sync_apple_rounds,
             sync_android_rounds,
             delete_round,
