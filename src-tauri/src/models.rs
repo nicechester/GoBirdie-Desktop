@@ -8,7 +8,7 @@ pub const GARMIN_EPOCH_OFFSET: i64 = 631065600;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub player_name: String,
-    pub device_source: String,  // "garmin" | "apple"
+    pub device_source: String,  // "garmin" | "apple" | "android"
     #[serde(default = "default_tee_color")]
     pub tee_color: String,      // "Black" | "Blue" | "White" | "Yellow" | "Red"
 }

@@ -5,6 +5,7 @@ mod parser;
 mod store;
 mod mtp;
 mod apple_sync;
+mod android_sync;
 
 
 use std::path::{Path, PathBuf};
@@ -210,6 +211,28 @@ async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummar
     Ok(new_summaries)
 }
 
+#[tauri::command]
+async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
+    let (host, list) = android_sync::sync_all(None)?;
+
+    let mut new_summaries = Vec::new();
+    for summary in list {
+        {
+            let store = state.store.lock().unwrap();
+            if store.contains_id(&summary.id) {
+                continue;
+            }
+        }
+
+        let round = android_sync::fetch_and_convert(&host, &summary.id)?;
+        let rs = RoundSummary::from(&round);
+        state.store.lock().unwrap().save_by_id(&summary.id, &round)?;
+        new_summaries.push(rs);
+    }
+
+    Ok(new_summaries)
+}
+
 #[allow(dead_code)]
 fn try_load_clubs(state: &AppState) -> Result<(), String> {
     // Look for Clubs.fit in the fit_dir
@@ -258,6 +281,7 @@ fn main() {
             get_settings,
             save_settings,
             sync_apple_rounds,
+            sync_android_rounds,
             delete_round,
         ])
         .run(tauri::generate_context!())

@@ -46,6 +46,10 @@ async function syncAppleRounds() {
     return invoke('sync_apple_rounds');
 }
 
+async function syncAndroidRounds() {
+    return invoke('sync_android_rounds');
+}
+
 async function deleteRound(id) {
     return invoke('delete_round', { id });
 }
@@ -109,7 +113,7 @@ function renderRoundsList() {
         <div class="round-item ${r.id === state.activeId ? 'active' : ''}" data-id="${r.id}">
             <div class="flex items-center justify-between">
                 <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm text-gray-800 truncate">${r.source === 'apple' ? '📱 ' : '⌚ '}${r.course_name || 'Unknown Course'}</div>
+                    <div class="font-medium text-sm text-gray-800 truncate">${r.source === 'apple' ? '📱 ' : r.source === 'android' ? '🤖 ' : '⌚ '}${r.course_name || 'Unknown Course'}</div>
                     <div class="text-xs text-gray-500">${r.date} · ${r.holes_played}H · ${r.duration_minutes}min</div>
                 </div>
                 <div class="ml-2 flex flex-col items-center">
@@ -2792,12 +2796,19 @@ function buildAiPrompt(round) {
 function applySyncButtonVisibility() {
     const syncBtn   = document.getElementById('sync-btn');
     const appleSyncBtn = document.getElementById('apple-sync-btn');
+    const androidSyncBtn = document.getElementById('android-sync-btn');
     if (state.settings?.device_source === 'apple') {
         syncBtn.classList.add('hidden');
         appleSyncBtn?.classList.remove('hidden');
+        androidSyncBtn?.classList.add('hidden');
+    } else if (state.settings?.device_source === 'android') {
+        syncBtn.classList.add('hidden');
+        appleSyncBtn?.classList.add('hidden');
+        androidSyncBtn?.classList.remove('hidden');
     } else {
         syncBtn.classList.remove('hidden');
         appleSyncBtn?.classList.add('hidden');
+        androidSyncBtn?.classList.add('hidden');
     }
 }
 
@@ -2824,7 +2835,7 @@ function renderSetupModal(isFirstRun) {
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">${t('setup.device')}</label>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-3 gap-3">
                     <div class="device-option ${device === 'garmin' ? 'selected' : ''}" data-device="garmin">
                         <div class="device-icon">⌚</div>
                         <div class="device-name">${t('setup.device.garmin')}</div>
@@ -2834,6 +2845,11 @@ function renderSetupModal(isFirstRun) {
                         <div class="device-icon">⌚</div>
                         <div class="device-name">${t('setup.device.apple')}</div>
                         <div class="device-desc">${t('setup.device.apple.desc')}</div>
+                    </div>
+                    <div class="device-option ${device === 'android' ? 'selected' : ''}" data-device="android">
+                        <div class="device-icon">📱</div>
+                        <div class="device-name">${t('setup.device.android')}</div>
+                        <div class="device-desc">${t('setup.device.android.desc')}</div>
                     </div>
                 </div>
             </div>
@@ -2907,6 +2923,35 @@ async function handleAppleSync() {
     }
 }
 
+async function handleAndroidSync() {
+    if (state.syncing) return;
+    state.syncing = true;
+
+    const btn   = document.getElementById('android-sync-btn');
+    const label = document.getElementById('android-sync-label');
+    btn.disabled = true;
+    label.textContent = t('sync.android.syncing');
+
+    try {
+        const newSummaries = await syncAndroidRounds();
+        const existing = new Map(state.rounds.map(r => [r.id, r]));
+        newSummaries.forEach(r => existing.set(r.id, r));
+        state.rounds = [...existing.values()].sort((a, b) => b.date.localeCompare(a.date));
+
+        renderRoundsList();
+        if (newSummaries.length > 0) loadDetail(newSummaries[0].id);
+        toast(t('toast.synced', { count: newSummaries.length }));
+        updateStats();
+    } catch (e) {
+        const msg = String(e).includes('not found') ? t('sync.android.notfound') : t('toast.syncfail', { err: e });
+        toast(msg, true);
+    } finally {
+        state.syncing = false;
+        btn.disabled = false;
+        label.textContent = t('sync.android.label');
+    }
+}
+
 async function handleSync() {
     if (state.syncing) return;
     state.syncing = true;
@@ -2975,6 +3020,7 @@ async function updateStats() {
 async function init() {
     document.getElementById('sync-btn').addEventListener('click', handleSync);
     document.getElementById('apple-sync-btn')?.addEventListener('click', handleAppleSync);
+    document.getElementById('android-sync-btn')?.addEventListener('click', handleAndroidSync);
     document.getElementById('search-input').addEventListener('input', e => {
         state.searchTerm = e.target.value.toLowerCase();
         renderRoundsList();
