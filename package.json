@@ -1,6 +1,6 @@
 {
   "name": "go-birdie-desktop",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Garmin golf round analyzer with scorecard and health data",
   "type": "module",
   "scripts": {
