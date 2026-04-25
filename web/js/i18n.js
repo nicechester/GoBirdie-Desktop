@@ -229,6 +229,8 @@ export const STRINGS = {
         'setup.device.garmin.desc': 'Sync via USB cable',
         'setup.device.apple': 'Apple Watch',
         'setup.device.apple.desc': 'Sync over local WiFi',
+        'setup.device.android': 'Android',
+        'setup.device.android.desc': 'Sync over local WiFi',
         'setup.save': 'Get Started',
         'setup.validation': 'Please enter your name and select a device.',
         'settings.title': 'Settings',
@@ -238,6 +240,9 @@ export const STRINGS = {
         'sync.apple.label': 'Sync iPhone',
         'sync.apple.syncing': 'Syncing...',
         'sync.apple.notfound': 'iPhone not found on network',
+        'sync.android.label': 'Sync Android',
+        'sync.android.syncing': 'Syncing...',
+        'sync.android.notfound': 'Android phone not found on network. Enable Sync Server in GoBirdie Settings.',
     },
 
     ko: {
@@ -449,6 +454,8 @@ export const STRINGS = {
         'setup.device.garmin.desc': 'USB 케이블로 동기화',
         'setup.device.apple': '애플 워치',
         'setup.device.apple.desc': '로컬 WiFi로 동기화',
+        'setup.device.android': '안드로이드',
+        'setup.device.android.desc': '로컬 WiFi로 동기화',
         'setup.save': '시작하기',
         'setup.validation': '이름을 입력하고 기기를 선택해 주세요.',
         'settings.title': '설정',
@@ -458,6 +465,9 @@ export const STRINGS = {
         'sync.apple.label': '아이폰 동기화',
         'sync.apple.syncing': '동기화 중...',
         'sync.apple.notfound': '네트워크에서 아이폰을 찾을 수 없습니다',
+        'sync.android.label': '안드로이드 동기화',
+        'sync.android.syncing': '동기화 중...',
+        'sync.android.notfound': '네트워크에서 안드로이드 폰을 찾을 수 없습니다. GoBirdie 설정에서 동기화 서버를 활성화하세요.',
     }
 };
 
