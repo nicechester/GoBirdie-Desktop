@@ -34,6 +34,7 @@
     "targets": "all",
     "externalBin": [
       "src/native/garmin_mtp",
+      "src/native/garmin_mtp_windows",
       "src/native/gobirdie-sync-helper"
     ],
     "icon": [
