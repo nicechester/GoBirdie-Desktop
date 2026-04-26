@@ -16,6 +16,13 @@ clang \
   "${NATIVE_SRC}"
 echo "    ${NATIVE_BIN}-${TARGET_TRIPLE} built"
 
+# Create placeholder for Windows binary (required by Tauri externalBin on all platforms)
+WIN_PLACEHOLDER="src-tauri/src/native/garmin_mtp_windows-${TARGET_TRIPLE}"
+if [ ! -f "${WIN_PLACEHOLDER}" ]; then
+    echo "==> Creating Windows binary placeholder for Tauri..."
+    touch "${WIN_PLACEHOLDER}"
+fi
+
 # ── 1b. Compile Swift sync helper ────────────────────────────────────────────
 echo "==> Building gobirdie-sync-helper..."
 SYNC_HELPER_DIR="src-tauri/src/native"
