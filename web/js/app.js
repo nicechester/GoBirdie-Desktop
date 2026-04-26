@@ -826,64 +826,71 @@ const lieAngleCache = {}; // roundId → { "hole-shotIdx": { angle, label } }
 // For each shot, sample elevation at ±10m perpendicular to shot bearing.
 async function fetchLieAngles(round) {
     const rid = round.id;
-    if (lieAngleCache[rid]) return lieAngleCache[rid];
+    if (rid in lieAngleCache) return lieAngleCache[rid]; // {} is valid cached result
 
     const sc = round.scorecard;
-    if (!sc?.hole_scores?.length) return {};
+    if (!sc?.hole_scores?.length) { lieAngleCache[rid] = {}; return {}; }
 
     const OFFSET_M = 10; // 10m each side
-    const queries = []; // { key, leftLat, leftLon, rightLat, rightLon }
+    const queries = [];
 
     sc.hole_scores.forEach(hs => {
         hs.shots.forEach((shot, idx) => {
             if (shot.club_category === 'putt') return;
             const bear = bearing(shot.from, shot.to);
-            const perpLeft = bear - 90;
-            const perpRight = bear + 90;
-            const left = offsetPoint(shot.from, perpLeft, OFFSET_M);
-            const right = offsetPoint(shot.from, perpRight, OFFSET_M);
-            queries.push({
-                key: `${hs.hole_number}-${idx}`,
-                left, right,
-            });
+            const left  = offsetPoint(shot.from, bear - 90, OFFSET_M);
+            const right = offsetPoint(shot.from, bear + 90, OFFSET_M);
+            queries.push({ key: `${hs.hole_number}-${idx}`, left, right });
         });
     });
 
     if (!queries.length) { lieAngleCache[rid] = {}; return {}; }
 
-    // Build batch locations string: left0,right0,left1,right1,...
-    // Open-Topo-Data accepts up to 100 points per request
     const allPoints = queries.flatMap(q => [q.left, q.right]);
     const results = {};
+
+    // Try ned10m (US, 10m) first, fall back to srtm30m (global, 30m)
+    const datasets = ['ned10m', 'srtm30m'];
 
     try {
         const BATCH = 100;
         const elevations = [];
+
         for (let i = 0; i < allPoints.length; i += BATCH) {
             const batch = allPoints.slice(i, i + BATCH);
             const locations = batch.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`).join('|');
-            const resp = await fetch(`https://api.opentopodata.org/v1/ned10m?locations=${locations}`);
-            const data = await resp.json();
-            if (data.status === 'OK' && data.results) {
-                elevations.push(...data.results.map(r => r.elevation));
-            } else {
-                // API error — fill with nulls
-                elevations.push(...batch.map(() => null));
+
+            let batchElevs = null;
+            for (const dataset of datasets) {
+                try {
+                    const resp = await fetch(`https://api.opentopodata.org/v1/${dataset}?locations=${locations}`);
+                    const data = await resp.json();
+                    if (data.status === 'OK' && data.results?.length) {
+                        // ned10m returns null outside US — check if we got real values
+                        const valid = data.results.filter(r => r.elevation != null);
+                        if (valid.length === data.results.length) {
+                            batchElevs = data.results.map(r => r.elevation);
+                            break;
+                        }
+                    }
+                } catch (_) {}
             }
-            // Rate limit: 1 req/sec for free tier
+
+            elevations.push(...(batchElevs ?? batch.map(() => null)));
+
             if (i + BATCH < allPoints.length) await new Promise(r => setTimeout(r, 1100));
         }
 
         queries.forEach((q, i) => {
-            const leftElev = elevations[i * 2];
+            const leftElev  = elevations[i * 2];
             const rightElev = elevations[i * 2 + 1];
             if (leftElev != null && rightElev != null) {
-                const diff = rightElev - leftElev; // positive = right side higher
+                const diff  = rightElev - leftElev;
                 const angle = Math.atan2(diff, OFFSET_M * 2) * 180 / Math.PI;
                 let label;
-                if (Math.abs(angle) < 1) label = 'Flat';
-                else if (angle > 0) label = `Ball below feet ${Math.abs(angle).toFixed(1)}°`;
-                else label = `Ball above feet ${Math.abs(angle).toFixed(1)}°`;
+                if (Math.abs(angle) < 1)  label = 'Flat';
+                else if (angle > 0)        label = `Ball below feet ${Math.abs(angle).toFixed(1)}°`;
+                else                       label = `Ball above feet ${Math.abs(angle).toFixed(1)}°`;
                 results[q.key] = { angle, label };
             }
         });
