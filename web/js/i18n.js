@@ -41,7 +41,7 @@ export const STRINGS = {
         // Tabs
         'tab.overview': 'Overview',
         'tab.shotmap': 'Shot Map',
-        'tab.stats': 'Course Stats',
+        'tab.stats': 'Club Performances',
         'tab.sg': 'Shot Analysis',
         'btn.askai': 'Ask AI',
 
@@ -266,7 +266,7 @@ export const STRINGS = {
         // Tabs
         'tab.overview': '개요',
         'tab.shotmap': '샷 맵',
-        'tab.stats': '코스 통계',
+        'tab.stats': '클럽 성적',
         'tab.sg': '샷 분석',
         'btn.askai': 'AI에게 물어보기',
 

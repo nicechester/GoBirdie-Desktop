@@ -242,7 +242,7 @@ async function loadDetail(id) {
         <div class="flex border-b bg-white sticky top-0 z-10 pt-4 mb-4">
             <button class="detail-tab active" data-tab="overview">Overview</button>
             <button class="detail-tab" data-tab="shotmap">Shot Map</button>
-            <button class="detail-tab" data-tab="stats">Course Stats</button>
+            <button class="detail-tab" data-tab="stats">Club Performances</button>
         </div>
         <div class="text-center text-gray-400 py-12">Loading...</div>`;
 
@@ -820,6 +820,92 @@ function buildHrZones(round) {
 // ── Shot Map ─────────────────────────────────────────────────────────────────
 
 let activeMap = null;
+const lieAngleCache = {}; // roundId → { "hole-shotIdx": { angle, label } }
+
+// Fetch lie angles from Open-Topo-Data for all shots in a round.
+// For each shot, sample elevation at ±10m perpendicular to shot bearing.
+async function fetchLieAngles(round) {
+    const rid = round.id;
+    if (lieAngleCache[rid]) return lieAngleCache[rid];
+
+    const sc = round.scorecard;
+    if (!sc?.hole_scores?.length) return {};
+
+    const OFFSET_M = 10; // 10m each side
+    const queries = []; // { key, leftLat, leftLon, rightLat, rightLon }
+
+    sc.hole_scores.forEach(hs => {
+        hs.shots.forEach((shot, idx) => {
+            if (shot.club_category === 'putt') return;
+            const bear = bearing(shot.from, shot.to);
+            const perpLeft = bear - 90;
+            const perpRight = bear + 90;
+            const left = offsetPoint(shot.from, perpLeft, OFFSET_M);
+            const right = offsetPoint(shot.from, perpRight, OFFSET_M);
+            queries.push({
+                key: `${hs.hole_number}-${idx}`,
+                left, right,
+            });
+        });
+    });
+
+    if (!queries.length) { lieAngleCache[rid] = {}; return {}; }
+
+    // Build batch locations string: left0,right0,left1,right1,...
+    // Open-Topo-Data accepts up to 100 points per request
+    const allPoints = queries.flatMap(q => [q.left, q.right]);
+    const results = {};
+
+    try {
+        const BATCH = 100;
+        const elevations = [];
+        for (let i = 0; i < allPoints.length; i += BATCH) {
+            const batch = allPoints.slice(i, i + BATCH);
+            const locations = batch.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`).join('|');
+            const resp = await fetch(`https://api.opentopodata.org/v1/ned10m?locations=${locations}`);
+            const data = await resp.json();
+            if (data.status === 'OK' && data.results) {
+                elevations.push(...data.results.map(r => r.elevation));
+            } else {
+                // API error — fill with nulls
+                elevations.push(...batch.map(() => null));
+            }
+            // Rate limit: 1 req/sec for free tier
+            if (i + BATCH < allPoints.length) await new Promise(r => setTimeout(r, 1100));
+        }
+
+        queries.forEach((q, i) => {
+            const leftElev = elevations[i * 2];
+            const rightElev = elevations[i * 2 + 1];
+            if (leftElev != null && rightElev != null) {
+                const diff = rightElev - leftElev; // positive = right side higher
+                const angle = Math.atan2(diff, OFFSET_M * 2) * 180 / Math.PI;
+                let label;
+                if (Math.abs(angle) < 1) label = 'Flat';
+                else if (angle > 0) label = `Ball below feet ${Math.abs(angle).toFixed(1)}°`;
+                else label = `Ball above feet ${Math.abs(angle).toFixed(1)}°`;
+                results[q.key] = { angle, label };
+            }
+        });
+    } catch (e) {
+        console.warn('Lie angle fetch failed:', e);
+    }
+
+    lieAngleCache[rid] = results;
+    return results;
+}
+
+// Offset a GPS point by distance (meters) along a bearing (degrees)
+function offsetPoint(point, bearingDeg, distM) {
+    const R = 6371000;
+    const lat1 = point.lat * Math.PI / 180;
+    const lon1 = point.lon * Math.PI / 180;
+    const brng = bearingDeg * Math.PI / 180;
+    const d = distM / R;
+    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+    const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+    return { lat: lat2 * 180 / Math.PI, lon: lon2 * 180 / Math.PI };
+}
 
 function buildShotMap(round) {
     const sc = round.scorecard;
@@ -945,7 +1031,7 @@ const CLUB_COLORS = {
     unknown:      '#9ca3af',  // gray
 };
 
-function renderShotMap(round) {
+async function renderShotMap(round) {
     const mapEl = document.getElementById('shot-map');
     if (!mapEl) return;
 
@@ -957,6 +1043,9 @@ function renderShotMap(round) {
 
     // Build timeline first so activeTimelinePts is available for shot features
     renderTimelineChart(round);
+
+    // Fetch lie angles (lazy, cached)
+    const lieAngles = await fetchLieAngles(round);
 
     // Destroy previous map instance
     if (activeMap) { activeMap.remove(); activeMap = null; }
@@ -1055,9 +1144,11 @@ function renderShotMap(round) {
 
     console.log('Computing hole bearings...');
     const holeBearings = {};
+    const holeGreenCenters = {};
     sc.hole_scores.forEach(hs => {
         if (!hs.shots.length) return;
-        holeBearings[hs.hole_number] = bearing(hs.shots[0].from, hs.shots[hs.shots.length - 1].to);
+        // Use green center (last shot destination) as the target for all shots on this hole
+        holeGreenCenters[hs.hole_number] = hs.shots[hs.shots.length - 1].to;
     });
     console.log('Hole bearings computed. Starting feature loop...');
 
@@ -1143,17 +1234,33 @@ function renderShotMap(round) {
         const dist = shot.distance_meters ? `${Math.round(shot.distance_meters * 1.09361)}yds` : '';
         const hr = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
         const alt = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
+        // Elevation change: shot altitude vs landing altitude
+        let elevHtml = '';
+        if (shot.altitude_meters != null) {
+            // Find next shot's altitude or use null
+            const holeShots = sc.hole_scores.find(h => h.hole_number === hole)?.shots;
+            const nextShot = holeShots?.[shotIdxInHole + 1];
+            const landingAlt = nextShot?.altitude_meters ?? null;
+            if (landingAlt != null) {
+                const diff = Math.round(landingAlt - shot.altitude_meters);
+                if (diff !== 0) elevHtml = `${diff > 0 ? '↑' : '↓'}${Math.abs(diff)}m`;
+            }
+        }
         const sgVal = sgLookup[`${hole}-${shotIdxInHole}`];
+        const lieData = lieAngles[`${hole}-${shotIdxInHole}`];
         let dirHtml = '';
-        if (!isPutt && holeBearings[hole] != null) {
+        if (!isPutt && holeGreenCenters[hole] != null) {
             const shotBear = bearing(shot.from, shot.to);
-            dirHtml = dirArrowSvg(deviation(shotBear, holeBearings[hole]));
+            const greenBear = bearing(shot.from, holeGreenCenters[hole]);
+            dirHtml = dirArrowSvg(deviation(shotBear, greenBear));
         }
         const spark = hr ? hrSparkline(shot, round.health_timeline) : '';
         const leftLines = [
             `<b>H${hole} ${isPutt ? 'Putt' : `Shot ${shotNum}`}</b>`,
             `Club: ${club}`,
             dist ? `Dist: ${dist}` : null,
+            elevHtml ? `Elev: ${elevHtml}` : null,
+            lieData && lieData.label !== 'Flat' ? `Lie: ${lieData.label}` : null,
             isPutt ? `Putts: ${holePutts[hole] ?? '?'}` : null,
             alt ? `Alt: ${alt}` : null,
             shot.swing_tempo != null ? `Tempo: ${shot.swing_tempo.toFixed(1)}:1` : null,
@@ -1592,22 +1699,27 @@ function buildCourseStats(round) {
             <p class="text-gray-400 text-sm">${t('stats.nodata')}</p></div>`;
     }
 
-    // Build enriched shot list with distance, bearing, deviation from hole direction
+    // Build enriched shot list with distance, bearing, deviation from green direction
     const enriched = [];
+    const cachedLie = lieAngleCache[round.id] || {};
     sc.hole_scores.forEach(hs => {
         const holeDef = sc.hole_definitions.find(h => h.hole_number === hs.hole_number);
         const shots = hs.shots;
         if (!shots.length) return;
 
-        // Hole direction = bearing from first shot to last shot destination
-        const firstFrom = shots[0].from;
-        const lastTo    = shots[shots.length - 1].to;
-        const holeBearing = bearing(firstFrom, lastTo);
+        // Green center = last shot destination
+        const greenCenter = shots[shots.length - 1].to;
 
         shots.forEach((shot, idx) => {
             const dist = distMeters(shot.from, shot.to);
             const bear = bearing(shot.from, shot.to);
-            const dev  = deviation(bear, holeBearing);
+            const greenBear = bearing(shot.from, greenCenter);
+            const dev  = deviation(bear, greenBear);
+            // Elevation change to landing
+            const nextShot = shots[idx + 1];
+            const landingAlt = nextShot?.altitude_meters ?? null;
+            const elevDiff = (shot.altitude_meters != null && landingAlt != null)
+                ? Math.round(landingAlt - shot.altitude_meters) : null;
             enriched.push({
                 hole:     hs.hole_number,
                 par:      holeDef?.par ?? 0,
@@ -1623,6 +1735,8 @@ function buildCourseStats(round) {
                 dirLabel: dirLabel(dev),
                 hr:       shot.heart_rate,
                 alt:      shot.altitude_meters,
+                elevDiff,
+                lie:      cachedLie[`${hs.hole_number}-${idx}`] ?? null,
             });
         });
     });
@@ -1663,7 +1777,11 @@ function buildStatSection(title, shots, isTee) {
         </div>`;
     };
 
-    const rows = shots.map(s => `
+    const rows = shots.map(s => {
+        const elevStr = s.elevDiff != null && s.elevDiff !== 0
+            ? `${s.elevDiff > 0 ? '↑' : '↓'}${Math.abs(s.elevDiff)}m` : '';
+        const lieStr = s.lie && s.lie.label !== 'Flat' ? s.lie.label : '';
+        return `
         <tr class="border-b border-gray-50 hover:bg-gray-50">
             <td class="py-1.5 text-xs text-gray-500">H${s.hole} S${s.shotNum}</td>
             <td class="py-1.5 text-xs">${s.club}</td>
@@ -1675,8 +1793,11 @@ function buildStatSection(title, shots, isTee) {
                 }">${s.dirLabel}</span>
                 <span class="text-gray-400 ml-1">(${s.deviation > 0 ? '+' : ''}${Math.round(s.deviation)}°)</span>
             </td>
+            <td class="py-1.5 text-xs ${s.elevDiff != null && s.elevDiff > 0 ? 'text-red-500' : 'text-blue-500'}">${elevStr}</td>
+            <td class="py-1.5 text-xs text-gray-500">${lieStr}</td>
             ${s.hr ? `<td class="py-1.5 text-xs text-gray-400">${s.hr} bpm</td>` : '<td></td>'}
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
@@ -1709,6 +1830,8 @@ function buildStatSection(title, shots, isTee) {
                     <th class="text-left py-1">${t('stats.club')}</th>
                     <th class="text-left py-1">${t('stats.dist')}</th>
                     <th class="text-left py-1">${t('stats.direction')}</th>
+                    <th class="text-left py-1">Elev</th>
+                    <th class="text-left py-1">Lie</th>
                     <th class="text-left py-1">${t('stats.hr')}</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
