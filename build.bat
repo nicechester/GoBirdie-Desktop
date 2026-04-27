@@ -37,12 +37,12 @@ if errorlevel 1 (
 )
 echo     %WIN_OUT% built
 
-:: ── 2. Create macOS binary placeholder (required by Tauri externalBin) ───────
-echo =^> Creating macOS binary placeholder for Tauri...
-set MAC_PLACEHOLDER=src-tauri\src\native\garmin_mtp-%TARGET_TRIPLE%
+:: ── 2. Create binary placeholders (required by Tauri externalBin) ───────
+echo =^> Creating binary placeholders for Tauri...
+set MAC_PLACEHOLDER=src-tauri\src\native\garmin_mtp-%TARGET_TRIPLE%.exe
 if not exist "%MAC_PLACEHOLDER%" type nul > "%MAC_PLACEHOLDER%"
 
-set SYNC_PLACEHOLDER=src-tauri\src\native\gobirdie-sync-helper-%TARGET_TRIPLE%
+set SYNC_PLACEHOLDER=src-tauri\src\native\gobirdie-sync-helper-%TARGET_TRIPLE%.exe
 if not exist "%SYNC_PLACEHOLDER%" type nul > "%SYNC_PLACEHOLDER%"
 
 :: ── 3. JS deps + Tauri build ─────────────────────────────────────────────────

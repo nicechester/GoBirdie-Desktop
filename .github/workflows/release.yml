@@ -93,6 +93,12 @@ jobs:
             src-tauri\src\native\garmin_mtp_windows.cpp ^
             /link Propsys.lib PortableDeviceGuids.lib Ole32.lib oleaut32.lib
 
+      - name: Create binary placeholders for Tauri
+        shell: cmd
+        run: |
+          type nul > "src-tauri\src\native\garmin_mtp-x86_64-pc-windows-msvc.exe"
+          type nul > "src-tauri\src\native\gobirdie-sync-helper-x86_64-pc-windows-msvc.exe"
+
       - name: Install frontend dependencies
         run: npm install
 
