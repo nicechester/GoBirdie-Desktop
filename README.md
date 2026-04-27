@@ -29,7 +29,7 @@ Interactive map showing every shot as a colored line and dot, color-coded by clu
 - Shot popups showing club, distance, elevation change (↑/↓), lie angle (ball above/below feet), HR sparkline, altitude, swing tempo, direction arrow (toward green), and strokes gained
 - Lie angle fetched from Open-Topo-Data NED 10m (US) / SRTM 30m (global) — sampled ±10m perpendicular to shot bearing
 - GPS trail toggle to show walking path
-- Round Timeline chart below the map showing HR, altitude, stress, and swing tempo over time with hole markers
+- Round Timeline chart on right showing HR, altitude, stress, and swing tempo over time with hole markers
 
 ![Shot Map](images/shotmap1.png)
 ![Shot Map — hole detail](images/shotmap2.png)
