@@ -418,7 +418,9 @@ fn main() {
             get_settings,
             save_settings,
             get_platform,
+            #[cfg(not(target_os = "windows"))]
             sync_apple_rounds,
+            #[cfg(not(target_os = "windows"))]
             sync_android_rounds,
             delete_round,
             fetch_elevations,
