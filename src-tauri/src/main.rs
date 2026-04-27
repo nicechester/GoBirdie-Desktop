@@ -6,6 +6,7 @@ mod store;
 mod mtp;
 #[cfg(not(target_os = "windows"))]
 mod apple_sync;
+#[cfg(not(target_os = "windows"))]
 mod android_sync;
 
 
@@ -226,6 +227,7 @@ fn get_platform() -> &'static str {
     #[cfg(target_os = "linux")] { "linux" }
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tauri::command]
 async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
     let (host, list) = android_sync::sync_all(None)?;
