@@ -30,7 +30,7 @@ if "%VCVARS%"=="" (
 call "%VCVARS%"
 
 cl /W3 /EHsc /Fe:"%WIN_OUT%" "%WIN_SRC%" ^
-    /link Propsys.lib PortableDeviceGuids.lib Ole32.lib
+    /link Propsys.lib PortableDeviceGuids.lib Ole32.lib oleaut32.lib
 if errorlevel 1 (
     echo ERROR: Failed to compile garmin_mtp_windows
     exit /b 1

@@ -91,7 +91,7 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           cl /W3 /EHsc /Fe:"src-tauri\src\native\garmin_mtp_windows-x86_64-pc-windows-msvc.exe" ^
             src-tauri\src\native\garmin_mtp_windows.cpp ^
-            /link Propsys.lib PortableDeviceGuids.lib Ole32.lib
+            /link Propsys.lib PortableDeviceGuids.lib Ole32.lib oleaut32.lib
 
       - name: Install frontend dependencies
         run: npm install
