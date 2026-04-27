@@ -1,6 +1,6 @@
 [package]
 name = "go-birdie-desktop"
-version = "2.0.4"
+version = "2.0.5"
 description = "Go Birdie Desktop — golf round analyzer"
 authors = ["Chester Kim"]
 edition = "2021"
