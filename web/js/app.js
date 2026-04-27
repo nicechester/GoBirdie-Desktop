@@ -299,7 +299,7 @@ function renderDetailTabs() {
     } else if (state.activeTab === 'shotmap') {
         tabContent = buildShotMap(round);
     } else if (state.activeTab === 'stats') {
-        tabContent = buildCourseStats(round);
+        tabContent = `<div id="course-stats">${buildCourseStats(round)}</div>`;
     } else if (state.activeTab === 'sg') {
         tabContent = buildStrokesGainedTab(round);
     }
@@ -327,6 +327,8 @@ function renderDetailTabs() {
         // no chart in overview anymore
     } else if (state.activeTab === 'shotmap') {
         requestAnimationFrame(() => renderShotMap(round));
+    } else if (state.activeTab === 'stats') {
+        requestAnimationFrame(() => renderCourseStatsAsync(round));
     }
 }
 
@@ -1037,6 +1039,17 @@ const CLUB_COLORS = {
     putt:         '#10b981',  // green
     unknown:      '#9ca3af',  // gray
 };
+
+async function renderCourseStatsAsync(round) {
+    const statsEl = document.getElementById('course-stats');
+    if (!statsEl) return;
+
+    // Fetch lie angles if not cached
+    await fetchLieAngles(round);
+
+    // Re-render stats with lie angles now available
+    statsEl.innerHTML = buildCourseStats(round);
+}
 
 async function renderShotMap(round) {
     const mapEl = document.getElementById('shot-map');
