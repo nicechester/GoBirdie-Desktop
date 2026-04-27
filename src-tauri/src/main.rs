@@ -248,6 +248,126 @@ async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSumm
     Ok(new_summaries)
 }
 
+#[tauri::command]
+async fn fetch_elevations(locations: Vec<String>) -> Result<Vec<Option<f64>>, String> {
+    if locations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let datasets = vec!["ned10m", "srtm30m"];
+    let batch_size = 100;
+    let max_retries = 3;
+
+    for dataset in datasets {
+        let mut all_elevations: Vec<Option<f64>> = Vec::new();
+        let mut success = true;
+
+        for chunk in locations.chunks(batch_size) {
+            let location_str = chunk.join("|");
+            let url = format!(
+                "https://api.opentopodata.org/v1/{}?locations={}",
+                dataset, location_str
+            );
+
+            let mut retry_count = 0;
+            let mut batch_success = false;
+
+            while retry_count < max_retries && !batch_success {
+                match reqwest::Client::new().get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(data) => {
+                                if data["status"].as_str() == Some("OK") {
+                                    if let Some(results) = data["results"].as_array() {
+                                        let batch_elevs: Vec<Option<f64>> = results
+                                            .iter()
+                                            .map(|r| r["elevation"].as_f64())
+                                            .collect();
+
+                                        // Check if all in batch are valid
+                                        if batch_elevs.iter().all(|e| e.is_some()) {
+                                            all_elevations.extend(batch_elevs);
+                                            batch_success = true;
+                                        } else if retry_count < max_retries - 1 {
+                                            eprintln!("[fetch_elevations] Dataset {} - invalid elevations (some null), retrying... (attempt {}/{})", dataset, retry_count + 1, max_retries);
+                                            retry_count += 1;
+                                            let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
+                                            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                                        } else {
+                                            eprintln!("[fetch_elevations] Dataset {} - invalid elevations after {} retries. URL: {}", dataset, max_retries, url);
+                                            success = false;
+                                            break;
+                                        }
+                                    } else if retry_count < max_retries - 1 {
+                                        eprintln!("[fetch_elevations] Dataset {} - no results array, retrying... (attempt {}/{})", dataset, retry_count + 1, max_retries);
+                                        retry_count += 1;
+                                        let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
+                                        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                                    } else {
+                                        eprintln!("[fetch_elevations] Dataset {} - no results array after {} retries. URL: {}", dataset, max_retries, url);
+                                        success = false;
+                                        break;
+                                    }
+                                } else if retry_count < max_retries - 1 {
+                                    eprintln!("[fetch_elevations] Dataset {} - status not OK ({}), retrying... (attempt {}/{})", dataset, data["status"], retry_count + 1, max_retries);
+                                    retry_count += 1;
+                                    let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
+                                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                                } else {
+                                    eprintln!("[fetch_elevations] Dataset {} - status not OK after {} retries. URL: {}", dataset, max_retries, url);
+                                    success = false;
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                if retry_count < max_retries - 1 {
+                                    eprintln!("[fetch_elevations] Dataset {} - JSON parse error ({}), retrying... (attempt {}/{})", dataset, e, retry_count + 1, max_retries);
+                                    retry_count += 1;
+                                    let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
+                                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                                } else {
+                                    eprintln!("[fetch_elevations] Dataset {} - JSON parse error after {} retries. Error: {}. URL: {}", dataset, max_retries, e, url);
+                                    success = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if retry_count < max_retries - 1 {
+                            eprintln!("[fetch_elevations] Dataset {} - HTTP request failed ({}), retrying... (attempt {}/{})", dataset, e, retry_count + 1, max_retries);
+                            retry_count += 1;
+                            let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
+                            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                        } else {
+                            eprintln!("[fetch_elevations] Dataset {} - HTTP request failed after {} retries. Error: {}. URL: {}", dataset, max_retries, e, url);
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !batch_success {
+                success = false;
+                break;
+            }
+
+            // Add delay between batches to avoid rate limiting
+            if chunk.len() == batch_size {
+                std::thread::sleep(std::time::Duration::from_millis(1100));
+            }
+        }
+
+        if success && all_elevations.len() == locations.len() {
+            return Ok(all_elevations);
+        }
+    }
+
+    // If both datasets failed or returned nulls, return nulls for all
+    Ok(vec![None; locations.len()])
+}
+
 #[allow(dead_code)]
 fn try_load_clubs(state: &AppState) -> Result<(), String> {
     // Look for Clubs.fit in the fit_dir
@@ -299,6 +419,7 @@ fn main() {
             sync_apple_rounds,
             sync_android_rounds,
             delete_round,
+            fetch_elevations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
