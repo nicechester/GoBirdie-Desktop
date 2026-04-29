@@ -52,8 +52,8 @@ export const STRINGS = {
         'stat.calories': 'Calories',
         'stat.altitude': 'Altitude',
         'stat.avgtempo': 'Avg Tempo',
-        'stat.ascent': 'Ascent: {v} m',
-        'stat.descent': 'Descent: {v} m',
+        'stat.ascent': 'Ascent: {v} ft',
+        'stat.descent': 'Descent: {v} ft',
 
         // Scorecard
         'scorecard.title': 'Scorecard',
@@ -277,8 +277,8 @@ export const STRINGS = {
         'stat.calories': '칼로리',
         'stat.altitude': '고도',
         'stat.avgtempo': '평균 템포',
-        'stat.ascent': '상승: {v} m',
-        'stat.descent': '하강: {v} m',
+        'stat.ascent': '상승: {v} ft',
+        'stat.descent': '하강: {v} ft',
 
         // Scorecard
         'scorecard.title': '스코어카드',

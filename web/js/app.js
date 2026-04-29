@@ -93,8 +93,10 @@ function overParStr(v) {
 
 function fmtAlt(min, max) {
     if (min == null || max == null) return null;
-    return `${Math.round(min)}–${Math.round(max)} m`;
+    return `${Math.round(min * 3.28084)}–${Math.round(max * 3.28084)} ft`;
 }
+
+function mToFt(m) { return Math.round(m * 3.28084); }
 
 function fmtTempo(ratio) {
     if (ratio == null) return null;
@@ -389,8 +391,8 @@ function buildHeader(round, sc, dateStr, timeStr) {
         </div>
         ${round.total_ascent != null ? `
         <div class="mt-3 flex gap-4 text-xs text-gray-500 justify-center">
-            <span>${t('stat.ascent', {v: round.total_ascent})}</span>
-            <span>${t('stat.descent', {v: round.total_descent})}</span>
+            <span>${t('stat.ascent', {v: mToFt(round.total_ascent)})}</span>
+            <span>${t('stat.descent', {v: mToFt(round.total_descent)})}</span>
         </div>` : ''}
     </div>`;
 }
@@ -431,7 +433,7 @@ function renderTimelineChart(round) {
         return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
     });
     const hrData     = pts.map(s => s.heart_rate ?? null);
-    const altData    = pts.map(s => s.altitude_meters != null ? +s.altitude_meters.toFixed(1) : null);
+    const altData    = pts.map(s => s.altitude_meters != null ? +(s.altitude_meters * 3.28084).toFixed(1) : null);
     const stressData = pts.map(s => s.stress_proxy ?? null);
 
     // Build tempo data — sparse samples mapped onto the health timeline index
@@ -570,7 +572,7 @@ function renderTimelineChart(round) {
                     spanGaps: true,
                 },
                 {
-                    label: 'Altitude (m)',
+                    label: 'Altitude (ft)',
                     data: altData,
                     borderColor: 'rgb(59,130,246)',
                     backgroundColor: 'rgba(59,130,246,0.07)',
@@ -629,7 +631,7 @@ function renderTimelineChart(round) {
                 yAlt: {
                     type: 'linear',
                     position: 'right',
-                    title: { display: true, text: 'Altitude (m)', font: { size: 11 } },
+                    title: { display: true, text: 'Altitude (ft)', font: { size: 11 } },
                     ticks: { font: { size: 10 } },
                     grid: { drawOnChartArea: false },
                 },
@@ -1242,7 +1244,7 @@ function updateElevationGainCell(key, gain) {
     const cellId = `elev-${key}`;
     const cell = document.getElementById(cellId);
     if (cell) {
-        const label = gain === 0 ? 'Flat' : `${gain > 0 ? '↑' : '↓'}${Math.abs(gain)}m`;
+        const label = gain === 0 ? 'Flat' : `${gain > 0 ? '↑' : '↓'}${mToFt(Math.abs(gain))}ft`;
         cell.innerHTML = label;
         console.log(`[updateElevationGainCell] Updated ${cellId} = ${label}`);
     } else {
@@ -1491,7 +1493,7 @@ async function renderShotMap(round) {
         holeShotIdx[hole] = shotIdxInHole + 1;
         const dist = shot.distance_meters ? `${Math.round(shot.distance_meters * 1.09361)}yds` : '';
         const hr = shot.heart_rate ? `${shot.heart_rate}bpm` : '';
-        const alt = shot.altitude_meters ? `${Math.round(shot.altitude_meters)}m alt` : '';
+        const alt = shot.altitude_meters ? `${mToFt(shot.altitude_meters)}ft alt` : '';
         // Elevation change: shot altitude vs landing altitude (or green for approach shots)
         let elevHtml = '';
         if (shot.altitude_meters != null) {
@@ -1511,7 +1513,7 @@ async function renderShotMap(round) {
 
             if (targetAlt != null) {
                 const diff = Math.round(targetAlt - shot.altitude_meters);
-                if (diff !== 0) elevHtml = `${diff > 0 ? '↑' : '↓'}${Math.abs(diff)}m`;
+                if (diff !== 0) elevHtml = `${diff > 0 ? '↑' : '↓'}${mToFt(Math.abs(diff))}ft`;
                 else elevHtml = 'Flat';
             }
         }
@@ -2061,7 +2063,7 @@ function buildStatSection(title, shots, isTee) {
         const spinner = '<svg class="inline w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
         const elevCellId = `elev-${s.hole}-${s.shotIdx}`;
         const elevStr = s.elevGain != null
-            ? (s.elevGain === 0 ? 'Flat' : `${s.elevGain > 0 ? '↑' : '↓'}${Math.abs(s.elevGain)}m`)
+            ? (s.elevGain === 0 ? 'Flat' : `${s.elevGain > 0 ? '↑' : '↓'}${mToFt(Math.abs(s.elevGain))}ft`)
             : '';
         const elevContent = elevStr || (s.cat !== 'putt' && s.alt != null ? spinner : '');
         const lieCellId = `lie-${s.hole}-${s.shotIdx}`;
@@ -2994,7 +2996,7 @@ function buildAiPrompt(round) {
     L.push(`${t('ai.holes')}: ${sc?.hole_scores.length ?? '—'}, ${t('ai.duration')}: ${Math.round(round.duration_seconds / 60)} min, ${t('ai.distance')}: ${(round.distance_meters / 1000).toFixed(2)} km`);
     L.push(`${t('ai.calories')}: ${round.calories ?? '—'}, ${t('ai.avghr')}: ${round.avg_heart_rate ?? '—'} bpm, ${t('ai.maxhr')}: ${round.max_heart_rate ?? '—'} bpm`);
     if (round.min_altitude_meters != null)
-        L.push(`${t('ai.altitude')}: ${Math.round(round.min_altitude_meters)}–${Math.round(round.max_altitude_meters)} m`);
+        L.push(`${t('ai.altitude')}: ${mToFt(round.min_altitude_meters)}–${mToFt(round.max_altitude_meters)} ft`);
     if (round.avg_swing_tempo != null)
         L.push(`${t('ai.avgtempo')}: ${round.avg_swing_tempo.toFixed(1)}:1`);
 
@@ -3028,7 +3030,7 @@ function buildAiPrompt(round) {
                 const elevGain = cachedElevGain[`${hs.hole_number}-${i}`];
                 const lie = cachedLie[`${hs.hole_number}-${i}`];
                 const elevStr = elevGain != null
-                    ? (elevGain === 0 ? 'Flat' : `${elevGain > 0 ? '↑' : '↓'}${Math.abs(elevGain)}m`)
+                    ? (elevGain === 0 ? 'Flat' : `${elevGain > 0 ? '↑' : '↓'}${mToFt(Math.abs(elevGain))}ft`)
                     : null;
                 const parts = [
                     `  ${t('ai.shot')} ${i+1}: ${shot.club_name ?? shot.club_category ?? 'Unknown'}`,
@@ -3036,7 +3038,7 @@ function buildAiPrompt(round) {
                     elevStr ? `Elev ${elevStr}` : null,
                     lie && lie.label ? `Lie ${lie.label}` : null,
                     shot.heart_rate      ? `HR ${shot.heart_rate}bpm` : null,
-                    shot.altitude_meters ? `Alt ${Math.round(shot.altitude_meters)}m` : null,
+                    shot.altitude_meters ? `Alt ${mToFt(shot.altitude_meters)}ft` : null,
                     shot.swing_tempo     ? `Tempo ${shot.swing_tempo.toFixed(1)}:1` : null,
                 ].filter(Boolean);
                 L.push(parts.join(', '));
