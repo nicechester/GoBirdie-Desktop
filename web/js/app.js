@@ -830,15 +830,10 @@ function buildHrZones(round) {
 // ── Shot Map ─────────────────────────────────────────────────────────────────
 
 let activeMap = null;
-const lieAngleCache = {}; // roundId → { "hole-shotIdx": { angle, label } }
-
-// Fetch lie angles from backend via Tauri command
+// Fetch lie angles from backend via Tauri command (cached per-location in Rust)
 async function fetchLieAngles(round) {
-    const rid = round.id;
-    if (rid in lieAngleCache) return lieAngleCache[rid];
-
     const sc = round.scorecard;
-    if (!sc?.hole_scores?.length) { lieAngleCache[rid] = {}; return {}; }
+    if (!sc?.hole_scores?.length) return {};
 
     const OFFSET_M = 10;
     const queries = [];
@@ -853,18 +848,14 @@ async function fetchLieAngles(round) {
         });
     });
 
-    if (!queries.length) { lieAngleCache[rid] = {}; return {}; }
+    if (!queries.length) return {};
 
     const allPoints = queries.flatMap(q => [q.left, q.right]);
     const locations = allPoints.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`);
     const results = {};
 
     try {
-        console.log(`[fetchLieAngles] Fetching ${locations.length} locations for shot map (${Math.ceil(locations.length / 100)} batches)`);
         const elevations = await invoke('fetch_elevations', { locations });
-
-        let successCount = 0;
-        let nullCount = 0;
 
         queries.forEach((q, i) => {
             const leftElev = elevations[i * 2];
@@ -877,23 +868,12 @@ async function fetchLieAngles(round) {
                 else if (angle > 0) label = `+${angle.toFixed(1)}°`;
                 else label = `${angle.toFixed(1)}°`;
                 results[q.key] = { angle, label };
-                successCount++;
-            } else {
-                nullCount++;
-                if (nullCount <= 5) {
-                    console.warn(`[fetchLieAngles] No elevation data for shot ${q.key}`);
-                }
             }
         });
-
-        console.log(`[fetchLieAngles] Success: ${successCount}/${queries.length}, No data: ${nullCount}/${queries.length}`);
-
     } catch (e) {
         console.error('[fetchLieAngles] API call failed:', e.message, e);
-        console.error('[fetchLieAngles] Requested', locations.length, 'locations in', Math.ceil(locations.length / 100), 'batches');
     }
 
-    lieAngleCache[rid] = results;
     return results;
 }
 
@@ -1034,91 +1014,19 @@ const CLUB_COLORS = {
 };
 
 async function fetchAndUpdateLieAnglesForStats(round) {
-    const rid = round.id;
-    if (rid in lieAngleCache) {
-        updateLieAngleCells(lieAngleCache[rid]);
-        return;
-    }
-
+    const lies = await fetchLieAngles(round);
+    Object.entries(lies).forEach(([key, lie]) => {
+        updateLieAngleCell(key, lie.label);
+    });
+    // Clear spinners for shots that got no elevation data
     const sc = round.scorecard;
-    if (!sc?.hole_scores?.length) {
-        lieAngleCache[rid] = {};
-        return;
-    }
-
-    const OFFSET_M = 10;
-    const queries = [];
-
-    sc.hole_scores.forEach(hs => {
+    sc?.hole_scores?.forEach(hs => {
         hs.shots.forEach((shot, idx) => {
             if (shot.club_category === 'putt') return;
-            const bear = bearing(shot.from, shot.to);
-            const left  = offsetPoint(shot.from, bear - 90, OFFSET_M);
-            const right = offsetPoint(shot.from, bear + 90, OFFSET_M);
-            queries.push({ key: `${hs.hole_number}-${idx}`, left, right });
+            const key = `${hs.hole_number}-${idx}`;
+            if (!(key in lies)) clearLieAngleSpinner(key);
         });
     });
-
-    if (!queries.length) {
-        lieAngleCache[rid] = {};
-        return;
-    }
-
-    const allPoints = queries.flatMap(q => [q.left, q.right]);
-    const locations = allPoints.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`);
-    const results = {};
-
-    try {
-        console.log(`[fetch_elevations] Fetching ${locations.length} locations (${Math.ceil(locations.length / 100)} batches)`);
-        const elevations = await invoke('fetch_elevations', { locations });
-
-        if (!elevations || elevations.length === 0) {
-            console.error('[fetch_elevations] Empty response from backend');
-        }
-
-        let successCount = 0;
-        let nullCount = 0;
-
-        queries.forEach((q, queryIdx) => {
-            const leftIdx = queryIdx * 2;
-            const rightIdx = queryIdx * 2 + 1;
-            const leftElev = elevations[leftIdx];
-            const rightElev = elevations[rightIdx];
-            if (leftElev != null && rightElev != null) {
-                const diff = rightElev - leftElev;
-                const angle = Math.atan2(diff, OFFSET_M * 2) * 180 / Math.PI;
-                let label;
-                if (Math.abs(angle) < 1) label = 'Flat';
-                else if (angle > 0) label = `+${angle.toFixed(1)}°`;
-                else label = `${angle.toFixed(1)}°`;
-                results[q.key] = { angle, label };
-                updateLieAngleCell(q.key, label);
-                successCount++;
-            } else {
-                // No elevation data available for this shot - clear the spinner
-                results[q.key] = null;
-                clearLieAngleSpinner(q.key);
-                nullCount++;
-                if (nullCount <= 5) {  // Log first 5 failures
-                    console.warn(`[fetch_elevations] No elevation data for shot ${q.key} (coords: ${locations[leftIdx]}, ${locations[rightIdx]})`);
-                }
-            }
-        });
-
-        console.log(`[fetch_elevations] Success: ${successCount}/${queries.length}, No data: ${nullCount}/${queries.length}`);
-
-    } catch (e) {
-        console.error('[fetch_elevations] API call failed:', e.message, e);
-        console.error('[fetch_elevations] Requested', locations.length, 'locations in', Math.ceil(locations.length / 100), 'batches');
-        // Clear all spinners on error
-        queries.forEach(q => {
-            if (!(q.key in results)) {
-                clearLieAngleSpinner(q.key);
-            }
-        });
-    }
-
-    lieAngleCache[rid] = results;
 }
 
 function updateLieAngleCell(key, label) {
@@ -1143,13 +1051,6 @@ function clearLieAngleSpinner(key) {
     }
 }
 
-function updateLieAngleCells(cachedLies) {
-    Object.entries(cachedLies).forEach(([key, lie]) => {
-        if (lie && lie.label !== 'Flat') {
-            updateLieAngleCell(key, lie.label);
-        }
-    });
-}
 
 const elevationGainCache = {}; // roundId → { "hole-shotIdx": gain }
 
@@ -1987,7 +1888,6 @@ function buildCourseStats(round) {
 
     // Build enriched shot list with distance, bearing, deviation from green direction
     const enriched = [];
-    const cachedLie = lieAngleCache[round.id] || {};
     const cachedElevGain = elevationGainCache[round.id] || {};
     sc.hole_scores.forEach(hs => {
         const holeDef = sc.hole_definitions.find(h => h.hole_number === hs.hole_number);
@@ -2018,7 +1918,6 @@ function buildCourseStats(round) {
                 hr:       shot.heart_rate,
                 alt:      shot.altitude_meters,
                 elevGain: cachedElevGain[`${hs.hole_number}-${idx}`] ?? null,
-                lie:      cachedLie[`${hs.hole_number}-${idx}`] ?? null,
             });
         });
     });
@@ -2030,15 +1929,15 @@ function buildCourseStats(round) {
 
     return `
     <div class="space-y-6">
-        ${buildStatSection(t('stats.teeshots'), teeShots, true)}
-        ${buildStatSection(t('stats.approach'), approachShots, false)}
-        ${buildStatSection(t('stats.wedges'), wedgeShots, false)}
+        ${buildStatSection(t('stats.teeshots'), teeShots, true, round)}
+        ${buildStatSection(t('stats.approach'), approachShots, false, round)}
+        ${buildStatSection(t('stats.wedges'), wedgeShots, false, round)}
         ${buildPuttSection(putts, sc)}
         ${buildClubSummary(enriched)}
     </div>`;
 }
 
-function buildStatSection(title, shots, isTee) {
+function buildStatSection(title, shots, isTee, round) {
     if (!shots.length) return '';
 
     const avgDist = shots.reduce((a, s) => a + s.distYds, 0) / shots.length;
@@ -2067,8 +1966,7 @@ function buildStatSection(title, shots, isTee) {
             : '';
         const elevContent = elevStr || (s.cat !== 'putt' && s.alt != null ? spinner : '');
         const lieCellId = `lie-${s.hole}-${s.shotIdx}`;
-        const lieStr = s.lie && s.lie.label !== 'Flat' ? s.lie.label : '';
-        const lieContent = lieStr || (s.cat !== 'putt' ? spinner : '');
+        const lieContent = s.cat !== 'putt' ? spinner : '';
         return `
         <tr class="border-b border-gray-50 hover:bg-gray-50">
             <td class="py-1.5 text-xs text-gray-500">H${s.hole} S${s.shotNum}</td>
@@ -3020,15 +2918,14 @@ function buildAiPrompt(round) {
     // Shot details
     if (sc) {
         L.push('\n' + t('ai.shotdetails'));
-        const cachedLie = lieAngleCache[round.id] || {};
-        const cachedElevGain = elevationGainCache[round.id] || {};
+            const cachedElevGain = elevationGainCache[round.id] || {};
         sc.hole_scores.forEach(hs => {
             const def = parMap[hs.hole_number];
             const distYds = def?.distance_cm ? Math.round(def.distance_cm / 91.44) : '?';
             L.push(`\n${t('ai.sc.hole')} ${hs.hole_number} (Par ${def?.par ?? '?'}, ${distYds} yds):`);
             hs.shots.forEach((shot, i) => {
                 const elevGain = cachedElevGain[`${hs.hole_number}-${i}`];
-                const lie = cachedLie[`${hs.hole_number}-${i}`];
+                const lie = null;
                 const elevStr = elevGain != null
                     ? (elevGain === 0 ? 'Flat' : `${elevGain > 0 ? '↑' : '↓'}${mToFt(Math.abs(elevGain))}ft`)
                     : null;
