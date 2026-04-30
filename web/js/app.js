@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
-import { t, getLang, initLangSelector } from './i18n.js';
+import { t, getLang, setLang } from './i18n.js';
 import maplibregl from 'maplibre-gl';
 
 const PAGE_SIZE = 10;
@@ -9,6 +9,7 @@ const state = {
     rounds: [],
     activeId: null,
     activeTab: 'overview',
+    activeView: 'detail',   // 'detail' | 'trends'
     searchTerm: '',
     syncOffset: 0,
     syncing: false,
@@ -223,6 +224,8 @@ function confirmDeleteRound(roundId) {
 // ── Round detail ─────────────────────────────────────────────────────────────
 
 async function loadDetail(id) {
+    state.activeView = 'detail';
+
     // If same round, just switch tab rendering — no re-fetch
     if (state.activeRound?.id === id) {
         renderDetailTabs();
@@ -3138,6 +3141,7 @@ function renderSetupModal(isFirstRun) {
     const modal = document.getElementById('setup-modal');
     const name = state.settings?.player_name ?? '';
     const device = state.settings?.device_source ?? '';
+    const lang = getLang();
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3175,6 +3179,20 @@ function renderSetupModal(isFirstRun) {
                     </div>
                 </div>
             </div>
+            ${!isFirstRun ? `
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">${t('settings.language')}</label>
+                <div class="flex gap-3">
+                    <button class="lang-option flex-1 py-2 rounded-lg border text-sm font-medium transition
+                        ${lang === 'en' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-lang="en">
+                        🇺🇸 English
+                    </button>
+                    <button class="lang-option flex-1 py-2 rounded-lg border text-sm font-medium transition
+                        ${lang === 'ko' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-lang="ko">
+                        🇰🇷 한국어
+                    </button>
+                </div>
+            </div>` : ''}
             <div id="setup-error" class="text-red-500 text-xs text-center hidden">${t('setup.validation')}</div>
             <button id="setup-save-btn"
                 class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
@@ -3186,12 +3204,25 @@ function renderSetupModal(isFirstRun) {
     modal.classList.remove('hidden');
 
     let selectedDevice = device;
+    let selectedLang = lang;
 
     modal.querySelectorAll('.device-option').forEach(el => {
         el.addEventListener('click', () => {
             modal.querySelectorAll('.device-option').forEach(o => o.classList.remove('selected'));
             el.classList.add('selected');
             selectedDevice = el.dataset.device;
+        });
+    });
+
+    modal.querySelectorAll('.lang-option').forEach(el => {
+        el.addEventListener('click', () => {
+            modal.querySelectorAll('.lang-option').forEach(o => {
+                o.classList.remove('border-blue-500', 'bg-blue-50', 'text-blue-700');
+                o.classList.add('border-gray-200', 'text-gray-600');
+            });
+            el.classList.add('border-blue-500', 'bg-blue-50', 'text-blue-700');
+            el.classList.remove('border-gray-200', 'text-gray-600');
+            selectedLang = el.dataset.lang;
         });
     });
 
@@ -3205,6 +3236,10 @@ function renderSetupModal(isFirstRun) {
         try {
             await saveSettings(settings);
             state.settings = settings;
+            if (selectedLang !== getLang()) {
+                setLang(selectedLang);
+                onLangChange();
+            }
             modal.classList.add('hidden');
             applySyncButtonVisibility();
             if (isFirstRun) {
@@ -3339,6 +3374,76 @@ async function updateStats() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
+// ── Hamburger Menu ───────────────────────────────────────────────────────────
+
+function initHamburgerMenu() {
+    const btn = document.getElementById('hamburger-btn');
+    const menu = document.getElementById('hamburger-menu');
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', () => menu.classList.add('hidden'));
+
+    document.getElementById('menu-trends').addEventListener('click', () => {
+        menu.classList.add('hidden');
+        showTrendsView();
+    });
+
+    document.getElementById('menu-settings').addEventListener('click', () => {
+        menu.classList.add('hidden');
+        renderSetupModal(false);
+    });
+}
+
+// ── Trends View ──────────────────────────────────────────────────────────────
+
+function showTrendsView() {
+    state.activeView = 'trends';
+    state.activeId = null;
+    renderRoundsList();
+
+    const content = document.getElementById('detail-content');
+    const empty = document.getElementById('detail-empty');
+    content.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    content.innerHTML = buildTrendsPage();
+}
+
+function buildTrendsPage() {
+    const rounds = state.rounds.filter(r => r.total_score > 0);
+    if (!rounds.length) {
+        return `<div class="flex flex-col items-center justify-center h-full text-gray-400 py-20">
+            <span class="text-5xl mb-4">📊</span>
+            <p class="text-lg">${t('trends.nodata')}</p>
+        </div>`;
+    }
+
+    return `
+    <div class="pt-6 pb-6 space-y-6">
+        <div class="flex items-center justify-between">
+            <h2 class="text-2xl font-bold text-gray-800">📊 ${t('trends.title')}</h2>
+            <span class="text-sm text-gray-400">${t('trends.subtitle', { count: rounds.length })}</span>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-20">
+            <span class="text-4xl block mb-4">🚧</span>
+            <p class="text-lg font-medium text-gray-500">${t('trends.coming')}</p>
+            <p class="text-sm mt-2">${t('trends.coming.desc')}</p>
+        </div>
+    </div>`;
+}
+
+function onLangChange() {
+    applyStaticTranslations();
+    renderRoundsList();
+    if (state.activeView === 'trends') showTrendsView();
+    else if (state.activeRound) renderDetailTabs();
+    updateStats();
+}
+
 async function init() {
     document.getElementById('sync-btn').addEventListener('click', handleSync);
     document.getElementById('apple-sync-btn')?.addEventListener('click', handleAppleSync);
@@ -3348,18 +3453,7 @@ async function init() {
         renderRoundsList();
     });
 
-    // Settings gear button
-    document.getElementById('settings-btn').addEventListener('click', () => {
-        renderSetupModal(false);
-    });
-
-    // Language selector
-    initLangSelector(() => {
-        applyStaticTranslations();
-        renderRoundsList();
-        if (state.activeRound) renderDetailTabs();
-        updateStats();
-    });
+    initHamburgerMenu();
     applyStaticTranslations();
 
     // Check first-run: load settings
@@ -3396,6 +3490,8 @@ function applyStaticTranslations() {
     document.getElementById('app-title').textContent = t('app.title');
     document.getElementById('sync-label').textContent = state.syncing ? t('sync.syncing') : t('sync.label');
     document.getElementById('search-input').placeholder = t('search.placeholder');
+    document.getElementById('menu-trends-label').textContent = t('menu.trends');
+    document.getElementById('menu-settings-label').textContent = t('menu.settings');
 }
 
 if (document.readyState === 'loading') {

@@ -460,6 +460,18 @@ export const STRINGS = {
         'setup.validation': '이름을 입력하고 기기를 선택해 주세요.',
         'settings.title': '설정',
         'settings.save': '저장',
+        'settings.language': '언어',
+
+        // Menu
+        'menu.trends': '트렌드',
+        'menu.settings': '설정',
+
+        // Trends
+        'trends.title': '성적 트렌드',
+        'trends.subtitle': '{count}개 라운드',
+        'trends.nodata': '스코어가 있는 라운드가 없습니다. 라운드를 동기화하면 트렌드를 확인할 수 있습니다.',
+        'trends.coming': '곧 출시 예정',
+        'trends.coming.desc': '스코어 트렌드, 클럽 성적, 스트로크 게인드 이력, 건강 데이터 추적을 모든 라운드에 걸쳐 확인할 수 있습니다.',
 
         // Apple sync
         'sync.apple.label': '아이폰 동기화',

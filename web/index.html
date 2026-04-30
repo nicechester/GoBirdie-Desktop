@@ -22,7 +22,6 @@
         </div>
         <div class="flex items-center gap-3">
             <span id="store-stats" class="text-sm text-gray-500"></span>
-            <div id="lang-selector"></div>
             <button id="sync-btn"
                 class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium flex items-center gap-2">
                 <span id="sync-icon">⌚</span>
@@ -38,10 +37,25 @@
                 <span>📱</span>
                 <span id="android-sync-label">Sync Android</span>
             </button>
-            <button id="settings-btn"
-                class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700" title="Settings">
-                ⚙️
-            </button>
+            <div class="relative">
+                <button id="hamburger-btn"
+                    class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-500 hover:text-gray-700" title="Menu">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <rect x="2" y="4" width="16" height="2" rx="1"/>
+                        <rect x="2" y="9" width="16" height="2" rx="1"/>
+                        <rect x="2" y="14" width="16" height="2" rx="1"/>
+                    </svg>
+                </button>
+                <div id="hamburger-menu" class="hidden absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                    <button id="menu-trends" class="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5">
+                        <span>📊</span> <span id="menu-trends-label">Trends</span>
+                    </button>
+                    <div class="border-t border-gray-100 my-1"></div>
+                    <button id="menu-settings" class="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5">
+                        <span>⚙️</span> <span id="menu-settings-label">Settings</span>
+                    </button>
+                </div>
+            </div>
         </div>
     </header>
 
