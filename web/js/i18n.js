@@ -235,6 +235,18 @@ export const STRINGS = {
         'setup.validation': 'Please enter your name and select a device.',
         'settings.title': 'Settings',
         'settings.save': 'Save',
+        'settings.language': 'Language',
+
+        // Menu
+        'menu.trends': 'Trends',
+        'menu.settings': 'Settings',
+
+        // Trends
+        'trends.title': 'Performance Trends',
+        'trends.subtitle': '{count} rounds',
+        'trends.nodata': 'No scored rounds yet. Sync some rounds to see trends.',
+        'trends.coming': 'Coming Soon',
+        'trends.coming.desc': 'Scoring trends, club performance, strokes gained history, and fitness tracking across all your rounds.',
 
         // Apple sync
         'sync.apple.label': 'Sync iPhone',
