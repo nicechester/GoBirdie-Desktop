@@ -10,6 +10,7 @@ mod apple_sync;
 mod android_sync;
 
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use sha2::Digest;
@@ -21,6 +22,7 @@ struct AppState {
     store: Mutex<Store>,
     fit_dir: PathBuf,
     clubs: Mutex<Vec<ClubInfo>>,
+    elevation_cache: Mutex<HashMap<String, Option<f64>>>,
 }
 
 fn hash_file(path: &Path) -> String {
@@ -251,122 +253,87 @@ async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSumm
 }
 
 #[tauri::command]
-async fn fetch_elevations(locations: Vec<String>) -> Result<Vec<Option<f64>>, String> {
+async fn fetch_elevations(locations: Vec<String>, state: State<'_, AppState>) -> Result<Vec<Option<f64>>, String> {
     if locations.is_empty() {
         return Ok(Vec::new());
     }
 
-    let datasets = vec!["ned10m", "srtm30m"];
+    // Partition into cached hits and uncached misses
+    let mut results: Vec<Option<f64>> = vec![None; locations.len()];
+    let mut uncached: Vec<(usize, String)> = Vec::new();
+    {
+        let cache = state.elevation_cache.lock().unwrap();
+        for (i, loc) in locations.iter().enumerate() {
+            match cache.get(loc) {
+                Some(&elev) => results[i] = elev,
+                None => uncached.push((i, loc.clone())),
+            }
+        }
+    }
+    if uncached.is_empty() {
+        return Ok(results);
+    }
+
+    // Fetch only uncached locations
+    let to_fetch: Vec<String> = uncached.iter().map(|(_, l)| l.clone()).collect();
+    let fetched = fetch_elevations_raw(&to_fetch).await?;
+
+    // Write back into results + cache
+    let mut cache = state.elevation_cache.lock().unwrap();
+    for (j, (orig_idx, loc)) in uncached.iter().enumerate() {
+        let elev = fetched[j];
+        results[*orig_idx] = elev;
+        cache.insert(loc.clone(), elev);
+    }
+
+    Ok(results)
+}
+
+/// Raw API fetch — no caching, just batched HTTP calls with retry.
+async fn fetch_elevations_raw(locations: &[String]) -> Result<Vec<Option<f64>>, String> {
+    let datasets = ["ned10m", "srtm30m"];
     let batch_size = 100;
     let max_retries = 3;
 
-    for dataset in datasets {
-        let mut all_elevations: Vec<Option<f64>> = Vec::new();
-        let mut success = true;
+    for dataset in &datasets {
+        let mut all: Vec<Option<f64>> = Vec::new();
+        let mut ok = true;
 
         for chunk in locations.chunks(batch_size) {
-            let location_str = chunk.join("|");
             let url = format!(
                 "https://api.opentopodata.org/v1/{}?locations={}",
-                dataset, location_str
+                dataset, chunk.join("|")
             );
 
-            let mut retry_count = 0;
-            let mut batch_success = false;
-
-            while retry_count < max_retries && !batch_success {
+            let mut attempt = 0;
+            let mut done = false;
+            while attempt < max_retries && !done {
                 match reqwest::Client::new().get(&url).send().await {
-                    Ok(resp) => {
-                        match resp.json::<serde_json::Value>().await {
-                            Ok(data) => {
-                                if data["status"].as_str() == Some("OK") {
-                                    if let Some(results) = data["results"].as_array() {
-                                        let batch_elevs: Vec<Option<f64>> = results
-                                            .iter()
-                                            .map(|r| r["elevation"].as_f64())
-                                            .collect();
-
-                                        // Check if all in batch are valid
-                                        if batch_elevs.iter().all(|e| e.is_some()) {
-                                            all_elevations.extend(batch_elevs);
-                                            batch_success = true;
-                                        } else if retry_count < max_retries - 1 {
-                                            eprintln!("[fetch_elevations] Dataset {} - invalid elevations (some null), retrying... (attempt {}/{})", dataset, retry_count + 1, max_retries);
-                                            retry_count += 1;
-                                            let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
-                                            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                                        } else {
-                                            eprintln!("[fetch_elevations] Dataset {} - invalid elevations after {} retries. URL: {}", dataset, max_retries, url);
-                                            success = false;
-                                            break;
-                                        }
-                                    } else if retry_count < max_retries - 1 {
-                                        eprintln!("[fetch_elevations] Dataset {} - no results array, retrying... (attempt {}/{})", dataset, retry_count + 1, max_retries);
-                                        retry_count += 1;
-                                        let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
-                                        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                                    } else {
-                                        eprintln!("[fetch_elevations] Dataset {} - no results array after {} retries. URL: {}", dataset, max_retries, url);
-                                        success = false;
-                                        break;
-                                    }
-                                } else if retry_count < max_retries - 1 {
-                                    eprintln!("[fetch_elevations] Dataset {} - status not OK ({}), retrying... (attempt {}/{})", dataset, data["status"], retry_count + 1, max_retries);
-                                    retry_count += 1;
-                                    let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
-                                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                                } else {
-                                    eprintln!("[fetch_elevations] Dataset {} - status not OK after {} retries. URL: {}", dataset, max_retries, url);
-                                    success = false;
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                if retry_count < max_retries - 1 {
-                                    eprintln!("[fetch_elevations] Dataset {} - JSON parse error ({}), retrying... (attempt {}/{})", dataset, e, retry_count + 1, max_retries);
-                                    retry_count += 1;
-                                    let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
-                                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                                } else {
-                                    eprintln!("[fetch_elevations] Dataset {} - JSON parse error after {} retries. Error: {}. URL: {}", dataset, max_retries, e, url);
-                                    success = false;
-                                    break;
-                                }
-                            }
+                    Ok(resp) => match resp.json::<serde_json::Value>().await {
+                        Ok(data) if data["status"].as_str() == Some("OK") => {
+                            if let Some(arr) = data["results"].as_array() {
+                                let batch: Vec<Option<f64>> = arr.iter().map(|r| r["elevation"].as_f64()).collect();
+                                if batch.iter().all(|e| e.is_some()) {
+                                    all.extend(batch);
+                                    done = true;
+                                } else { attempt += 1; }
+                            } else { attempt += 1; }
                         }
-                    }
-                    Err(e) => {
-                        if retry_count < max_retries - 1 {
-                            eprintln!("[fetch_elevations] Dataset {} - HTTP request failed ({}), retrying... (attempt {}/{})", dataset, e, retry_count + 1, max_retries);
-                            retry_count += 1;
-                            let backoff_ms = 1000 * (2_u64.pow(retry_count as u32 - 1));
-                            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                        } else {
-                            eprintln!("[fetch_elevations] Dataset {} - HTTP request failed after {} retries. Error: {}. URL: {}", dataset, max_retries, e, url);
-                            success = false;
-                            break;
-                        }
-                    }
+                        _ => { attempt += 1; }
+                    },
+                    Err(_) => { attempt += 1; }
+                }
+                if !done && attempt < max_retries {
+                    std::thread::sleep(std::time::Duration::from_millis(1000 * 2_u64.pow(attempt as u32 - 1)));
                 }
             }
-
-            if !batch_success {
-                success = false;
-                break;
-            }
-
-            // Add delay between batches to avoid rate limiting
+            if !done { ok = false; break; }
             if chunk.len() == batch_size {
                 std::thread::sleep(std::time::Duration::from_millis(1100));
             }
         }
-
-        if success && all_elevations.len() == locations.len() {
-            return Ok(all_elevations);
-        }
+        if ok && all.len() == locations.len() { return Ok(all); }
     }
-
-    // If both datasets failed or returned nulls, return nulls for all
     Ok(vec![None; locations.len()])
 }
 
@@ -407,6 +374,7 @@ fn main() {
             store: Mutex::new(store),
             fit_dir,
             clubs: Mutex::new(initial_clubs),
+            elevation_cache: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
             sync_rounds,
