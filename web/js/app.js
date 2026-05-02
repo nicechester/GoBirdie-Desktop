@@ -3411,10 +3411,19 @@ function showTrendsView() {
     empty.classList.add('hidden');
 
     content.innerHTML = buildTrendsPage();
+
+    const rounds = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+    if (rounds.length) {
+        requestAnimationFrame(() => {
+            renderScoreTrendChart(rounds);
+            renderShortGameTrendChart(rounds);
+            renderFitnessTrendChart(rounds);
+        });
+    }
 }
 
 function buildTrendsPage() {
-    const rounds = state.rounds.filter(r => r.total_score > 0);
+    const rounds = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
     if (!rounds.length) {
         return `<div class="flex flex-col items-center justify-center h-full text-gray-400 py-20">
             <span class="text-5xl mb-4">📊</span>
@@ -3428,12 +3437,263 @@ function buildTrendsPage() {
             <h2 class="text-2xl font-bold text-gray-800">📊 ${t('trends.title')}</h2>
             <span class="text-sm text-gray-400">${t('trends.subtitle', { count: rounds.length })}</span>
         </div>
-        <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-20">
-            <span class="text-4xl block mb-4">🚧</span>
-            <p class="text-lg font-medium text-gray-500">${t('trends.coming')}</p>
-            <p class="text-sm mt-2">${t('trends.coming.desc')}</p>
-        </div>
+        ${buildScoringTrends(rounds)}
+        ${buildShortGameTrends(rounds)}
+        ${buildFitnessTrends(rounds)}
     </div>`;
+}
+
+function buildScoringTrends(rounds) {
+    const scores = rounds.map(r => r.total_score);
+    const overPars = rounds.map(r => r.score_over_par);
+    const best = Math.min(...scores);
+    const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 10) / 10;
+    const avgOverPar = Math.round(overPars.reduce((a, b) => a + b, 0) / overPars.length * 10) / 10;
+    const recent5 = scores.slice(-5);
+    const earlier5 = scores.slice(-10, -5);
+    let trendArrow = '→';
+    if (recent5.length >= 3 && earlier5.length >= 3) {
+        const recentAvg = recent5.reduce((a, b) => a + b, 0) / recent5.length;
+        const earlierAvg = earlier5.reduce((a, b) => a + b, 0) / earlier5.length;
+        if (recentAvg < earlierAvg - 1) trendArrow = '↓';
+        else if (recentAvg > earlierAvg + 1) trendArrow = '↑';
+    }
+    const trendColor = trendArrow === '↓' ? 'text-green-600' : trendArrow === '↑' ? 'text-red-600' : 'text-gray-500';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.scoring')}</h3>
+        <div class="grid grid-cols-4 gap-4 mb-4 text-center">
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-700">${best}</div>
+                <div class="text-xs text-gray-500">${t('trends.best')}</div>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-blue-700">${avg}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgscore')}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold ${avgOverPar > 0 ? 'text-red-600' : 'text-green-600'}">${avgOverPar > 0 ? '+' : ''}${avgOverPar}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgoverpar')}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold ${trendColor}">${trendArrow}</div>
+                <div class="text-xs text-gray-500">${t('trends.trend')}</div>
+            </div>
+        </div>
+        <div style="height:220px"><canvas id="score-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderScoreTrendChart(rounds) {
+    const canvas = document.getElementById('score-trend-chart');
+    if (!canvas) return;
+    const labels = rounds.map(r => r.date.slice(5));
+    const overPars = rounds.map(r => r.score_over_par);
+    // 5-round moving average
+    const ma = overPars.map((_, i) => {
+        const start = Math.max(0, i - 4);
+        const slice = overPars.slice(start, i + 1);
+        return +(slice.reduce((a, b) => a + b, 0) / slice.length).toFixed(1);
+    });
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: t('trends.overpar'),
+                    data: overPars,
+                    borderColor: 'rgb(239,68,68)',
+                    backgroundColor: overPars.map(v => v <= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)'),
+                    borderWidth: 1.5,
+                    pointRadius: 4,
+                    pointStyle: 'circle',
+                    tension: 0.3,
+                },
+                {
+                    label: t('trends.movingavg'),
+                    data: ma,
+                    borderColor: 'rgb(99,102,241)',
+                    borderWidth: 2,
+                    borderDash: [6, 3],
+                    pointRadius: 0,
+                    tension: 0.4,
+                },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y > 0 ? '+' : ''}${ctx.parsed.y}` } },
+            },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                y: { title: { display: true, text: t('trends.overpar'), font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => v > 0 ? `+${v}` : v } },
+            }
+        }
+    });
+}
+
+function buildShortGameTrends(rounds) {
+    const totalPutts = rounds.reduce((a, r) => a + r.total_putts, 0);
+    const totalHoles = rounds.reduce((a, r) => a + r.holes_played, 0);
+    const avgPuttsPerHole = totalHoles > 0 ? (totalPutts / totalHoles).toFixed(1) : '—';
+    const avgGir = totalHoles > 0 ? Math.round(rounds.reduce((a, r) => a + r.gir, 0) / rounds.length * 10) / 10 : '—';
+    const avgFir = rounds.length > 0 ? Math.round(rounds.reduce((a, r) => a + r.fairways_hit, 0) / rounds.length * 10) / 10 : '—';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.shortgame')}</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-blue-700">${avgPuttsPerHole}</div>
+                <div class="text-xs text-gray-500">${t('trends.puttsperhole')}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-700">${avgGir}</div>
+                <div class="text-xs text-gray-500">${t('trends.avggir')}</div>
+            </div>
+            <div class="bg-yellow-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-yellow-700">${avgFir}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgfir')}</div>
+            </div>
+        </div>
+        <div style="height:220px"><canvas id="shortgame-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderShortGameTrendChart(rounds) {
+    const canvas = document.getElementById('shortgame-trend-chart');
+    if (!canvas) return;
+    const labels = rounds.map(r => r.date.slice(5));
+    const putts = rounds.map(r => r.total_putts);
+    const gir = rounds.map(r => r.gir);
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: t('trends.putts'),
+                    data: putts,
+                    borderColor: 'rgb(59,130,246)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yPutts',
+                },
+                {
+                    label: 'GIR',
+                    data: gir,
+                    borderColor: 'rgb(34,197,94)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yGir',
+                },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                yPutts: { type: 'linear', position: 'left', title: { display: true, text: t('trends.putts'), font: { size: 11 } }, ticks: { font: { size: 10 } } },
+                yGir: { type: 'linear', position: 'right', title: { display: true, text: 'GIR', font: { size: 11 } }, ticks: { font: { size: 10 } }, grid: { drawOnChartArea: false } },
+            }
+        }
+    });
+}
+
+function buildFitnessTrends(rounds) {
+    const hrRounds = rounds.filter(r => r.avg_heart_rate);
+    const avgHr = hrRounds.length ? Math.round(hrRounds.reduce((a, r) => a + r.avg_heart_rate, 0) / hrRounds.length) : '—';
+    const calRounds = rounds.filter(r => r.calories);
+    const avgCal = calRounds.length ? Math.round(calRounds.reduce((a, r) => a + r.calories, 0) / calRounds.length) : '—';
+    const tempoRounds = rounds.filter(r => r.avg_swing_tempo);
+    const avgTempo = tempoRounds.length ? (tempoRounds.reduce((a, r) => a + r.avg_swing_tempo, 0) / tempoRounds.length).toFixed(1) : '—';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.fitness')}</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-red-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-red-600">${avgHr}</div>
+                <div class="text-xs text-gray-500">${t('trends.avghr')}</div>
+            </div>
+            <div class="bg-orange-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-orange-600">${avgCal}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgcal')}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-600">${avgTempo !== '—' ? avgTempo + ':1' : '—'}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgtempo')}</div>
+            </div>
+        </div>
+        <div style="height:220px"><canvas id="fitness-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderFitnessTrendChart(rounds) {
+    const canvas = document.getElementById('fitness-trend-chart');
+    if (!canvas) return;
+    const labels = rounds.map(r => r.date.slice(5));
+    const hr = rounds.map(r => r.avg_heart_rate ?? null);
+    const cal = rounds.map(r => r.calories ?? null);
+    const tempo = rounds.map(r => r.avg_swing_tempo ? +r.avg_swing_tempo.toFixed(2) : null);
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: t('trends.hr'),
+                    data: hr,
+                    borderColor: 'rgb(239,68,68)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yHr',
+                    spanGaps: true,
+                },
+                {
+                    label: t('trends.calories'),
+                    data: cal,
+                    borderColor: 'rgb(249,115,22)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yCal',
+                    spanGaps: true,
+                },
+                {
+                    label: t('trends.tempo'),
+                    data: tempo,
+                    borderColor: 'rgb(16,185,129)',
+                    borderWidth: 0,
+                    pointRadius: 4,
+                    showLine: false,
+                    yAxisID: 'yTempo',
+                    spanGaps: false,
+                },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                yHr: { type: 'linear', position: 'left', title: { display: true, text: t('trends.hr'), font: { size: 11 } }, ticks: { font: { size: 10 } } },
+                yCal: { type: 'linear', position: 'right', title: { display: true, text: t('trends.calories'), font: { size: 11 } }, ticks: { font: { size: 10 } }, grid: { drawOnChartArea: false } },
+                yTempo: { type: 'linear', position: 'right', display: false, min: 1.5, max: 6.0 },
+            }
+        }
+    });
 }
 
 function onLangChange() {
