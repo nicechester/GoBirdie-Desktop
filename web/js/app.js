@@ -32,6 +32,10 @@ async function getRoundDetail(id) {
     return invoke('get_round_detail', { id });
 }
 
+async function getAllRoundsLight() {
+    return invoke('get_all_rounds_light');
+}
+
 async function getStoreStats() {
     return invoke('get_store_stats');
 }
@@ -3400,7 +3404,7 @@ function initHamburgerMenu() {
 
 // ── Trends View ──────────────────────────────────────────────────────────────
 
-function showTrendsView() {
+async function showTrendsView() {
     state.activeView = 'trends';
     state.activeId = null;
     renderRoundsList();
@@ -3410,15 +3414,36 @@ function showTrendsView() {
     content.classList.remove('hidden');
     empty.classList.add('hidden');
 
-    content.innerHTML = buildTrendsPage();
+    const summaryRounds = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+    if (!summaryRounds.length) {
+        content.innerHTML = buildTrendsPage();
+        return;
+    }
 
-    const rounds = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
-    if (rounds.length) {
-        requestAnimationFrame(() => {
-            renderScoreTrendChart(rounds);
-            renderShortGameTrendChart(rounds);
-            renderFitnessTrendChart(rounds);
-        });
+    // Show summary sections immediately, load detail sections async
+    content.innerHTML = buildTrendsPage();
+    requestAnimationFrame(() => {
+        renderScoreTrendChart(summaryRounds);
+        renderShortGameTrendChart(summaryRounds);
+        renderFitnessTrendChart(summaryRounds);
+    });
+
+    // Load light rounds for SG + club trends
+    try {
+        const lightRounds = await getAllRoundsLight();
+        if (state.activeView !== 'trends') return; // user navigated away
+
+        const sgSection = document.getElementById('trends-sg-section');
+        const clubSection = document.getElementById('trends-club-section');
+        if (sgSection) {
+            sgSection.innerHTML = buildSgTrends(lightRounds);
+            requestAnimationFrame(() => renderSgTrendChart(lightRounds));
+        }
+        if (clubSection) {
+            clubSection.innerHTML = buildClubTrends(lightRounds);
+        }
+    } catch (e) {
+        console.error('Failed to load light rounds for trends:', e);
     }
 }
 
@@ -3439,6 +3464,8 @@ function buildTrendsPage() {
         </div>
         ${buildScoringTrends(rounds)}
         ${buildShortGameTrends(rounds)}
+        <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+        <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
         ${buildFitnessTrends(rounds)}
     </div>`;
 }
@@ -3694,6 +3721,208 @@ function renderFitnessTrendChart(rounds) {
             }
         }
     });
+}
+
+// ── SG Trends (uses light rounds with scorecards) ────────────────────────────
+
+function computeSgForRound(round) {
+    // Reuse existing computeStrokesGained which works on any round with scorecard
+    return computeStrokesGained(round);
+}
+
+function buildSgTrends(lightRounds) {
+    const sgData = lightRounds
+        .map(r => ({ round: r, sg: computeSgForRound(r) }))
+        .filter(d => d.sg != null);
+
+    if (sgData.length < 2) {
+        return `<div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('trends.sg.nodata')}</div>`;
+    }
+
+    const avgTotal = sgData.reduce((a, d) => a + d.sg.total, 0) / sgData.length;
+    const cats = ['off_tee', 'approach', 'short_game', 'putting'];
+    const catAvgs = {};
+    cats.forEach(c => {
+        catAvgs[c] = sgData.reduce((a, d) => a + d.sg.categories[c], 0) / sgData.length;
+    });
+    const strongest = cats.reduce((a, b) => catAvgs[a] > catAvgs[b] ? a : b);
+    const weakest = cats.reduce((a, b) => catAvgs[a] < catAvgs[b] ? a : b);
+    const catLabels = { off_tee: t('sg.offtee'), approach: t('sg.approach'), short_game: t('sg.shortgame'), putting: t('sg.putting') };
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.sg.title')}</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold" style="color:${sgColor(avgTotal)}">${avgTotal >= 0 ? '+' : ''}${avgTotal.toFixed(1)}</div>
+                <div class="text-xs text-gray-500">${t('trends.sg.avgtotal')}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-lg font-bold text-green-700">${catLabels[strongest]}</div>
+                <div class="text-xs text-gray-500">${t('trends.sg.strongest')}</div>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3">
+                <div class="text-lg font-bold text-red-700">${catLabels[weakest]}</div>
+                <div class="text-xs text-gray-500">${t('trends.sg.weakest')}</div>
+            </div>
+        </div>
+        <div style="height:240px"><canvas id="sg-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderSgTrendChart(lightRounds) {
+    const canvas = document.getElementById('sg-trend-chart');
+    if (!canvas) return;
+
+    const sgData = lightRounds
+        .map(r => ({ round: r, sg: computeSgForRound(r) }))
+        .filter(d => d.sg != null);
+
+    const labels = sgData.map(d => {
+        const dt = new Date((d.round.start_ts + GARMIN_EPOCH) * 1000);
+        return `${dt.getMonth()+1}/${dt.getDate()}`;
+    });
+
+    const colors = {
+        off_tee: 'rgb(239,68,68)',
+        approach: 'rgb(59,130,246)',
+        short_game: 'rgb(234,179,8)',
+        putting: 'rgb(16,185,129)',
+    };
+    const catLabels = { off_tee: t('sg.offtee'), approach: t('sg.approach'), short_game: t('sg.shortgame'), putting: t('sg.putting') };
+
+    const datasets = Object.entries(colors).map(([cat, color]) => ({
+        label: catLabels[cat],
+        data: sgData.map(d => +d.sg.categories[cat].toFixed(2)),
+        borderColor: color,
+        borderWidth: 1.5,
+        pointRadius: 3,
+        tension: 0.3,
+    }));
+
+    new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y}` } },
+            },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                y: { title: { display: true, text: 'SG', font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => v >= 0 ? `+${v}` : v } },
+            }
+        }
+    });
+}
+
+// ── Club Trends (uses light rounds with scorecards) ──────────────────────────
+
+function filterOutliers(distances) {
+    if (distances.length < 4) return { normal: distances, excluded: [] };
+    const sorted = [...distances].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const lower = q1 - 1.5 * (q3 - q1);
+    return {
+        normal: distances.filter(d => d >= lower),
+        excluded: distances.filter(d => d < lower),
+    };
+}
+
+function buildClubTrends(lightRounds) {
+    // Collect all non-putt shots across all rounds
+    const clubMap = {}; // clubName → [{ distYds, dev, roundDate }]
+    lightRounds.forEach(r => {
+        const sc = r.scorecard;
+        if (!sc?.hole_scores?.length) return;
+        const dt = new Date((r.start_ts + GARMIN_EPOCH) * 1000);
+        const dateLabel = `${dt.getMonth()+1}/${dt.getDate()}`;
+        sc.hole_scores.forEach(hs => {
+            const shots = hs.shots;
+            if (!shots.length) return;
+            const green = shots[shots.length - 1].to;
+            shots.forEach((shot, idx) => {
+                const cat = shot.club_category ?? 'unknown';
+                if (cat === 'putt') return;
+                const name = shot.club_name ?? cat;
+                const dist = metersToYards(distMeters(shot.from, shot.to));
+                const shotBear = bearing(shot.from, shot.to);
+                const greenBear = bearing(shot.from, green);
+                const dev = deviation(shotBear, greenBear);
+                if (!clubMap[name]) clubMap[name] = [];
+                clubMap[name].push({ distYds: dist, dev, dateLabel, roundDate: r.start_ts });
+            });
+        });
+    });
+
+    const catOrder = { tee: 0, fairway_wood: 1, iron: 2, wedge: 3, unknown: 4 };
+    const clubs = Object.entries(clubMap)
+        .filter(([, shots]) => shots.length >= 3)
+        .map(([name, shots]) => {
+            const dists = shots.map(s => s.distYds);
+            const { normal, excluded } = filterOutliers(dists);
+            const avg = normal.length ? Math.round(normal.reduce((a, b) => a + b, 0) / normal.length) : 0;
+            const max = normal.length ? Math.round(Math.max(...normal)) : 0;
+            const straight = shots.filter(s => Math.abs(s.dev) < 15).length;
+            // Determine category from first shot's club_category in any round
+            let cat = 'unknown';
+            for (const r of lightRounds) {
+                const sc = r.scorecard;
+                if (!sc) continue;
+                for (const hs of sc.hole_scores) {
+                    const s = hs.shots.find(s => s.club_name === name);
+                    if (s?.club_category) { cat = s.club_category; break; }
+                }
+                if (cat !== 'unknown') break;
+            }
+            return { name, cat, shots: shots.length, avg, max, excluded: excluded.length, straightPct: Math.round(straight / shots.length * 100) };
+        })
+        .sort((a, b) => (catOrder[a.cat] ?? 4) - (catOrder[b.cat] ?? 4) || b.avg - a.avg);
+
+    if (!clubs.length) {
+        return `<div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('trends.club.nodata')}</div>`;
+    }
+
+    const maxAvg = Math.max(...clubs.map(c => c.avg));
+    const rows = clubs.map(c => {
+        const exclNote = c.excluded > 0 ? `<span class="text-xs text-gray-400 ml-1">(${c.excluded} ${t('trends.club.excl')})</span>` : '';
+        return `
+        <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-2 text-sm font-medium">${c.name}</td>
+            <td class="py-2 text-xs text-gray-400 text-center">${c.shots}</td>
+            <td class="py-2">
+                <div class="flex items-center gap-2">
+                    <div class="w-24 bg-gray-100 rounded-full h-2">
+                        <div class="bg-blue-500 h-2 rounded-full" style="width:${(c.avg/maxAvg*100).toFixed(0)}%"></div>
+                    </div>
+                    <span class="text-sm font-medium">${c.avg} yds</span>
+                    ${exclNote}
+                </div>
+            </td>
+            <td class="py-2 text-xs text-gray-400">${c.max} yds</td>
+            <td class="py-2 text-xs ${c.straightPct >= 60 ? 'text-green-600' : 'text-gray-400'}">${c.straightPct}%</td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.club.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('trends.club.desc')}</p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-xs text-gray-400 border-b">
+                    <th class="text-left py-1">${t('stats.club')}</th>
+                    <th class="text-center py-1">${t('scorecard.shots')}</th>
+                    <th class="text-left py-1">${t('trends.club.avgdist')}</th>
+                    <th class="text-left py-1">Max</th>
+                    <th class="text-left py-1">${t('stats.straightpct')}</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>`;
 }
 
 function onLangChange() {
