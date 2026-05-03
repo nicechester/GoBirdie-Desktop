@@ -3497,7 +3497,10 @@ async function showTrendsView() {
             requestAnimationFrame(() => renderSgTrendChart(lightRounds));
         }
         if (clubSection) {
-            clubSection.innerHTML = buildClubTrends(lightRounds);
+            // Store lightRounds for club detail interactions
+            state._trendLightRounds = lightRounds;
+            clubSection.innerHTML = buildClubTrends(lightRounds) + `<div id="trends-club-detail"></div>`;
+            wireClubTrendControls(lightRounds);
         }
     } catch (e) {
         console.error('Failed to load light rounds for trends:', e);
@@ -3892,10 +3895,11 @@ function filterOutliers(distances) {
     };
 }
 
-function buildClubTrends(lightRounds) {
-    // Collect all non-putt shots across all rounds
-    const clubMap = {}; // clubName → [{ distYds, dev, roundDate }]
-    lightRounds.forEach(r => {
+// Collect per-shot data from light rounds, optionally limited to last N rounds
+function collectClubShots(lightRounds, lastN) {
+    const rounds = lastN ? lightRounds.slice(-lastN) : lightRounds;
+    const clubMap = {};
+    rounds.forEach(r => {
         const sc = r.scorecard;
         if (!sc?.hole_scores?.length) return;
         const dt = new Date((r.start_ts + GARMIN_EPOCH) * 1000);
@@ -3904,7 +3908,7 @@ function buildClubTrends(lightRounds) {
             const shots = hs.shots;
             if (!shots.length) return;
             const green = shots[shots.length - 1].to;
-            shots.forEach((shot, idx) => {
+            shots.forEach(shot => {
                 const cat = shot.club_category ?? 'unknown';
                 if (cat === 'putt') return;
                 const name = shot.club_name ?? cat;
@@ -3912,33 +3916,26 @@ function buildClubTrends(lightRounds) {
                 const shotBear = bearing(shot.from, shot.to);
                 const greenBear = bearing(shot.from, green);
                 const dev = deviation(shotBear, greenBear);
-                if (!clubMap[name]) clubMap[name] = [];
-                clubMap[name].push({ distYds: dist, dev, dateLabel, roundDate: r.start_ts });
+                if (!clubMap[name]) clubMap[name] = { cat, shots: [] };
+                clubMap[name].shots.push({ distYds: dist, dev, dateLabel, roundTs: r.start_ts });
             });
         });
     });
+    return clubMap;
+}
 
+function buildClubTrends(lightRounds) {
+    const clubMap = collectClubShots(lightRounds);
     const catOrder = { tee: 0, fairway_wood: 1, iron: 2, wedge: 3, unknown: 4 };
     const clubs = Object.entries(clubMap)
-        .filter(([, shots]) => shots.length >= 3)
-        .map(([name, shots]) => {
-            const dists = shots.map(s => s.distYds);
+        .filter(([, v]) => v.shots.length >= 3)
+        .map(([name, v]) => {
+            const dists = v.shots.map(s => s.distYds);
             const { normal, excluded } = filterOutliers(dists);
             const avg = normal.length ? Math.round(normal.reduce((a, b) => a + b, 0) / normal.length) : 0;
             const max = normal.length ? Math.round(Math.max(...normal)) : 0;
-            const straight = shots.filter(s => Math.abs(s.dev) < 15).length;
-            // Determine category from first shot's club_category in any round
-            let cat = 'unknown';
-            for (const r of lightRounds) {
-                const sc = r.scorecard;
-                if (!sc) continue;
-                for (const hs of sc.hole_scores) {
-                    const s = hs.shots.find(s => s.club_name === name);
-                    if (s?.club_category) { cat = s.club_category; break; }
-                }
-                if (cat !== 'unknown') break;
-            }
-            return { name, cat, shots: shots.length, avg, max, excluded: excluded.length, straightPct: Math.round(straight / shots.length * 100) };
+            const straight = v.shots.filter(s => Math.abs(s.dev) < 15).length;
+            return { name, cat: v.cat, shots: v.shots.length, avg, max, excluded: excluded.length, straightPct: Math.round(straight / v.shots.length * 100) };
         })
         .sort((a, b) => (catOrder[a.cat] ?? 4) - (catOrder[b.cat] ?? 4) || b.avg - a.avg);
 
@@ -3967,6 +3964,14 @@ function buildClubTrends(lightRounds) {
         </tr>`;
     }).join('');
 
+    // Club pills for detail section
+    const clubNames = clubs.map(c => c.name);
+    const clubPills = clubNames.map((n, i) => `
+        <button class="club-detail-btn px-3 py-1 text-xs rounded-full border transition
+            ${i === 0 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50 hover:border-blue-400'}" data-club="${n}">
+            ${n}
+        </button>`).join('');
+
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.club.title')}</h3>
@@ -3983,7 +3988,164 @@ function buildClubTrends(lightRounds) {
                 <tbody>${rows}</tbody>
             </table>
         </div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-6 mt-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.clubdetail.title')}</h3>
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap">${clubPills}</div>
+            <div class="ml-auto flex gap-1">
+                <button class="round-filter-btn px-3 py-1 text-xs rounded-full border border-gray-300 hover:bg-blue-50 transition" data-n="10">${t('trends.last')} 10</button>
+                <button class="round-filter-btn px-3 py-1 text-xs rounded-full border border-gray-300 hover:bg-blue-50 transition" data-n="20">${t('trends.last')} 20</button>
+                <button class="round-filter-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border-blue-600" data-n="all">${t('shotmap.all')}</button>
+            </div>
+        </div>
+        <div id="club-detail-charts">
+            <div class="grid grid-cols-2 gap-4">
+                <div style="height:220px"><canvas id="club-dist-chart"></canvas></div>
+                <div style="height:220px"><canvas id="club-dir-chart"></canvas></div>
+            </div>
+        </div>
     </div>`;
+}
+
+let _clubDistChart = null;
+let _clubDirChart = null;
+
+function wireClubTrendControls(lightRounds) {
+    let selectedClub = document.querySelector('.club-detail-btn')?.dataset.club;
+    let selectedN = null; // all
+
+    function refresh() {
+        renderClubDetailCharts(lightRounds, selectedClub, selectedN);
+    }
+
+    document.querySelectorAll('.club-detail-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.club-detail-btn').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                b.classList.add('border-gray-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('border-gray-300');
+            selectedClub = btn.dataset.club;
+            refresh();
+        });
+    });
+
+    document.querySelectorAll('.round-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.round-filter-btn').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                b.classList.add('border-gray-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('border-gray-300');
+            selectedN = btn.dataset.n === 'all' ? null : parseInt(btn.dataset.n);
+            refresh();
+        });
+    });
+
+    if (selectedClub) refresh();
+}
+
+function renderClubDetailCharts(lightRounds, clubName, lastN) {
+    const clubMap = collectClubShots(lightRounds, lastN);
+    const data = clubMap[clubName];
+    if (!data?.shots.length) return;
+
+    // Group shots by round date
+    const byRound = {};
+    data.shots.forEach(s => {
+        const key = s.dateLabel;
+        if (!byRound[key]) byRound[key] = { dists: [], devs: [], ts: s.roundTs };
+        byRound[key].dists.push(s.distYds);
+        byRound[key].devs.push(s.dev);
+    });
+
+    const roundKeys = Object.keys(byRound).sort((a, b) => byRound[a].ts - byRound[b].ts);
+    const labels = roundKeys;
+    const avgDists = roundKeys.map(k => {
+        const { normal } = filterOutliers(byRound[k].dists);
+        return normal.length ? Math.round(normal.reduce((a, b) => a + b, 0) / normal.length) : null;
+    });
+    const avgDevs = roundKeys.map(k => {
+        const devs = byRound[k].devs;
+        return devs.length ? Math.round(devs.reduce((a, b) => a + b, 0) / devs.length) : null;
+    });
+    const straightPcts = roundKeys.map(k => {
+        const devs = byRound[k].devs;
+        return devs.length ? Math.round(devs.filter(d => Math.abs(d) < 15).length / devs.length * 100) : null;
+    });
+
+    // Distance chart
+    if (_clubDistChart) _clubDistChart.destroy();
+    const distCanvas = document.getElementById('club-dist-chart');
+    if (distCanvas) {
+        _clubDistChart = new Chart(distCanvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: `${clubName} ${t('trends.club.avgdist')}`,
+                    data: avgDists,
+                    borderColor: 'rgb(59,130,246)',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    tension: 0.3,
+                    spanGaps: true,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                    y: { title: { display: true, text: t('stats.dist') + ' (yds)', font: { size: 11 } }, ticks: { font: { size: 10 } } },
+                }
+            }
+        });
+    }
+
+    // Direction chart
+    if (_clubDirChart) _clubDirChart.destroy();
+    const dirCanvas = document.getElementById('club-dir-chart');
+    if (dirCanvas) {
+        _clubDirChart = new Chart(dirCanvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: t('trends.clubdetail.avgdev'),
+                        data: avgDevs,
+                        backgroundColor: avgDevs.map(v => v == null ? 'transparent' : v > 10 ? 'rgba(249,115,22,0.6)' : v < -10 ? 'rgba(59,130,246,0.6)' : 'rgba(34,197,94,0.6)'),
+                        borderRadius: 3,
+                        yAxisID: 'yDev',
+                    },
+                    {
+                        label: t('stats.straightpct'),
+                        data: straightPcts,
+                        type: 'line',
+                        borderColor: 'rgb(34,197,94)',
+                        borderWidth: 1.5,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        yAxisID: 'yPct',
+                        spanGaps: true,
+                    },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                scales: {
+                    x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                    yDev: { type: 'linear', position: 'left', title: { display: true, text: t('trends.clubdetail.deviation'), font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => `${v > 0 ? '+' : ''}${v}°` } },
+                    yPct: { type: 'linear', position: 'right', min: 0, max: 100, title: { display: true, text: t('stats.straightpct'), font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => `${v}%` }, grid: { drawOnChartArea: false } },
+                }
+            }
+        });
+    }
 }
 
 function onLangChange() {

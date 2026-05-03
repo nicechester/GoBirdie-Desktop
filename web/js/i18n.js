@@ -282,6 +282,10 @@ export const STRINGS = {
         'trends.club.avgdist': 'Avg Distance',
         'trends.club.excl': 'excl',
         'trends.club.nodata': 'Not enough club data for trends.',
+        'trends.clubdetail.title': 'Club Detail Trends',
+        'trends.clubdetail.avgdev': 'Avg Deviation (°)',
+        'trends.clubdetail.deviation': 'Deviation (°)',
+        'trends.last': 'Last',
 
         // Apple sync
         'sync.apple.notfound': 'iPhone not found on network',
@@ -552,6 +556,10 @@ export const STRINGS = {
         'trends.club.avgdist': '평균 거리',
         'trends.club.excl': '제외',
         'trends.club.nodata': '클럽 트렌드를 위한 데이터가 부족합니다.',
+        'trends.clubdetail.title': '클럽별 상세 트렌드',
+        'trends.clubdetail.avgdev': '평균 편차 (°)',
+        'trends.clubdetail.deviation': '편차 (°)',
+        'trends.last': '최근',
 
         // Apple sync
         'sync.apple.notfound': '네트워크에서 아이폰을 찾을 수 없습니다',
