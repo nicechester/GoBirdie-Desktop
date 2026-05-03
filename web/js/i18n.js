@@ -240,6 +240,8 @@ export const STRINGS = {
         'settings.sgbaseline.desc': 'Compare your shots against this handicap level.',
         'settings.sg.scratch': 'Scratch',
         'settings.sg.handicap': '{v} HCP',
+        'settings.outliers': 'Exclude outlier shots',
+        'settings.outliers.desc': 'Filter out shanks, tops, and GPS errors from club distance stats using IQR.',
 
         // Menu
         'menu.trends': 'Trends',
@@ -508,6 +510,8 @@ export const STRINGS = {
         'settings.sgbaseline.desc': '이 핸디캅 수준과 비교합니다.',
         'settings.sg.scratch': '스크래치',
         'settings.sg.handicap': '{v} 핸디캅',
+        'settings.outliers': '이상치 샷 제외',
+        'settings.outliers.desc': '상크, 탑, GPS 오류 등을 IQR 기반으로 클럽 거리 통계에서 제외합니다.',
 
         // Menu
         'menu.trends': '트렌드',

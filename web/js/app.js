@@ -3164,6 +3164,7 @@ function renderSetupModal(isFirstRun) {
     const device = state.settings?.device_source ?? '';
     const lang = getLang();
     const sgBaseline = state.settings?.sg_baseline ?? '10';
+    const excludeOutliers = state.settings?.exclude_outliers ?? true;
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3230,6 +3231,15 @@ function renderSetupModal(isFirstRun) {
                 </div>
                 <p class="text-xs text-gray-400 mt-1">${t('settings.sgbaseline.desc')}</p>
             </div>` : ''}
+            ${!isFirstRun ? `
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="setup-outliers" ${excludeOutliers ? 'checked' : ''}
+                        class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm font-medium text-gray-700">${t('settings.outliers')}</span>
+                </label>
+                <p class="text-xs text-gray-400 mt-1 ml-6">${t('settings.outliers.desc')}</p>
+            </div>` : ''}
             <div id="setup-error" class="text-red-500 text-xs text-center hidden">${t('setup.validation')}</div>
             <button id="setup-save-btn"
                 class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
@@ -3282,7 +3292,8 @@ function renderSetupModal(isFirstRun) {
             modal.querySelector('#setup-error').classList.remove('hidden');
             return;
         }
-        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline };
+        const outliers = modal.querySelector('#setup-outliers')?.checked ?? true;
+        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline, exclude_outliers: outliers };
         try {
             await saveSettings(settings);
             state.settings = settings;
@@ -3866,14 +3877,18 @@ function renderSgTrendChart(lightRounds) {
 // ── Club Trends (uses light rounds with scorecards) ──────────────────────────
 
 function filterOutliers(distances) {
-    if (distances.length < 4) return { normal: distances, excluded: [] };
+    if (!state.settings?.exclude_outliers || distances.length < 4) {
+        return { normal: distances, excluded: [] };
+    }
     const sorted = [...distances].sort((a, b) => a - b);
     const q1 = sorted[Math.floor(sorted.length * 0.25)];
     const q3 = sorted[Math.floor(sorted.length * 0.75)];
-    const lower = q1 - 1.5 * (q3 - q1);
+    const iqr = q3 - q1;
+    const lower = q1 - 1.5 * iqr;
+    const upper = q3 + 1.5 * iqr;
     return {
-        normal: distances.filter(d => d >= lower),
-        excluded: distances.filter(d => d < lower),
+        normal: distances.filter(d => d >= lower && d <= upper),
+        excluded: distances.filter(d => d < lower || d > upper),
     };
 }
 
