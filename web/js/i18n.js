@@ -113,7 +113,7 @@ export const STRINGS = {
 
         // Strokes Gained
         'sg.title': 'Strokes Gained',
-        'sg.desc': 'Based on Mark Broadie\'s Every Shot Counts · single-digit handicap baseline',
+        'sg.desc': 'Based on Mark Broadie\'s Every Shot Counts · {baseline} baseline',
         'sg.total': 'Total SG',
         'sg.offtee': 'Off the Tee',
         'sg.approach': 'Approach',
@@ -167,7 +167,7 @@ export const STRINGS = {
         'ai.sc.shots': 'Shots', 'ai.sc.clubs': 'Clubs', 'ai.sc.total': 'Total', 'ai.sc.na': 'n/a',
         'ai.shotdetails': '## Shot Details', 'ai.shot': 'Shot',
         'ai.insights': '## Pre-computed Insights',
-        'ai.sg': '## Strokes Gained (single-digit handicap baseline)',
+        'ai.sg': '## Strokes Gained ({baseline} baseline)',
         'ai.sg.total': 'Total', 'ai.sg.pershot': '\nPer-shot SG:',
         'ai.sg.hole': 'Hole', 'ai.sg.dist': 'Dist',
         'ai.sg.cats.off_tee': 'Off the Tee', 'ai.sg.cats.approach': 'Approach',
@@ -236,6 +236,10 @@ export const STRINGS = {
         'settings.title': 'Settings',
         'settings.save': 'Save',
         'settings.language': 'Language',
+        'settings.sgbaseline': 'Strokes Gained Baseline',
+        'settings.sgbaseline.desc': 'Compare your shots against this handicap level.',
+        'settings.sg.scratch': 'Scratch',
+        'settings.sg.handicap': '{v} HCP',
 
         // Menu
         'menu.trends': 'Trends',
@@ -377,7 +381,7 @@ export const STRINGS = {
 
         // Strokes Gained
         'sg.title': '스트로크 게인드',
-        'sg.desc': 'Mark Broadie의 Every Shot Counts 기반 · 싱글 핸디캡 기준선',
+        'sg.desc': 'Mark Broadie의 Every Shot Counts 기반 · {baseline} 기준선',
         'sg.total': '총 SG',
         'sg.offtee': '티샷',
         'sg.approach': '어프로치',
@@ -431,7 +435,7 @@ export const STRINGS = {
         'ai.sc.shots': '샷', 'ai.sc.clubs': '클럽', 'ai.sc.total': '합계', 'ai.sc.na': '해당없음',
         'ai.shotdetails': '## 샷 상세', 'ai.shot': '샷',
         'ai.insights': '## 사전 분석 인사이트',
-        'ai.sg': '## 스트로크 게인드 (싱글 핸디캡 기준선)',
+        'ai.sg': '## 스트로크 게인드 ({baseline} 기준선)',
         'ai.sg.total': '합계', 'ai.sg.pershot': '\n샷별 SG:',
         'ai.sg.hole': '홀', 'ai.sg.dist': '거리',
         'ai.sg.cats.off_tee': '티샷', 'ai.sg.cats.approach': '어프로치',
@@ -500,6 +504,10 @@ export const STRINGS = {
         'settings.title': '설정',
         'settings.save': '저장',
         'settings.language': '언어',
+        'settings.sgbaseline': '스트로크 게인드 기준선',
+        'settings.sgbaseline.desc': '이 핸디캅 수준과 비교합니다.',
+        'settings.sg.scratch': '스크래치',
+        'settings.sg.handicap': '{v} 핸디캅',
 
         // Menu
         'menu.trends': '트렌드',

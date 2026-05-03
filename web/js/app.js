@@ -2125,34 +2125,50 @@ function buildClubSummary(enriched) {
 
 // ── Strokes Gained (Broadie / Every Shot Counts) ─────────────────────────────
 
-// Single-digit handicap baseline: expected strokes to hole out from given distance (yards).
-// Sources: Mark Broadie "Every Shot Counts" scratch/single-digit amateur tables, interpolated.
-// Keys: distance in yards → expected strokes. We interpolate between entries.
-const SG_BASELINE_TEE = [
-    // distance, expected strokes (from tee box)
-    [100, 2.72], [125, 2.78], [150, 2.85], [175, 2.94], [200, 3.06],
-    [225, 3.17], [250, 3.28], [275, 3.39], [300, 3.50], [325, 3.61],
-    [350, 3.71], [375, 3.80], [400, 3.90], [425, 4.01], [450, 4.12],
-    [475, 4.22], [500, 4.33], [525, 4.45], [550, 4.57], [575, 4.68], [600, 4.80],
-];
-const SG_BASELINE_FAIRWAY = [
-    // distance, expected strokes (from fairway)
-    [20, 2.45], [30, 2.50], [40, 2.55], [50, 2.61], [60, 2.67],
-    [80, 2.76], [100, 2.85], [120, 2.96], [140, 3.08], [150, 3.15],
-    [160, 3.21], [175, 3.31], [200, 3.46], [225, 3.62], [250, 3.78], [275, 3.94],
-];
-const SG_BASELINE_ROUGH = [
-    // distance, expected strokes (from rough — ~0.15-0.2 penalty over fairway)
-    [20, 2.60], [30, 2.65], [40, 2.71], [50, 2.78], [60, 2.84],
-    [80, 2.94], [100, 3.04], [120, 3.16], [140, 3.29], [150, 3.36],
-    [160, 3.43], [175, 3.53], [200, 3.69], [225, 3.86], [250, 4.03],
-];
-const SG_BASELINE_GREEN = [
-    // distance in feet, expected putts (single-digit: better from short range)
-    [1, 1.00], [2, 1.01], [3, 1.07], [4, 1.15], [5, 1.24],
-    [6, 1.33], [8, 1.47], [10, 1.58], [15, 1.73], [20, 1.84],
-    [25, 1.94], [30, 2.03], [40, 2.16], [50, 2.27], [60, 2.36], [90, 2.55],
-];
+// Expected strokes tables by handicap level.
+// Sources: Mark Broadie "Every Shot Counts" — scratch through 20-hcp amateur tables, interpolated.
+// Each level: { tee, fairway, rough, green } arrays of [distance, expected_strokes].
+const SG_BASELINES = {
+    scratch: {
+        tee: [[100,2.60],[150,2.70],[200,2.87],[250,3.08],[300,3.30],[350,3.52],[400,3.72],[450,3.93],[500,4.15],[550,4.38],[600,4.60]],
+        fairway: [[20,2.30],[40,2.40],[60,2.52],[80,2.62],[100,2.72],[120,2.82],[140,2.94],[160,3.07],[180,3.20],[200,3.32],[225,3.48],[250,3.64]],
+        rough: [[20,2.48],[40,2.58],[60,2.70],[80,2.80],[100,2.92],[120,3.04],[140,3.17],[160,3.30],[200,3.56],[250,3.90]],
+        green: [[1,1.00],[2,1.00],[3,1.04],[4,1.10],[5,1.17],[6,1.25],[8,1.38],[10,1.48],[15,1.63],[20,1.74],[30,1.91],[50,2.14],[90,2.40]],
+    },
+    '5': {
+        tee: [[100,2.66],[150,2.78],[200,2.97],[250,3.18],[300,3.40],[350,3.62],[400,3.82],[450,4.03],[500,4.25],[550,4.48],[600,4.70]],
+        fairway: [[20,2.38],[40,2.48],[60,2.60],[80,2.70],[100,2.80],[120,2.90],[140,3.02],[160,3.15],[180,3.28],[200,3.40],[225,3.56],[250,3.72]],
+        rough: [[20,2.55],[40,2.65],[60,2.78],[80,2.88],[100,2.99],[120,3.11],[140,3.24],[160,3.38],[200,3.64],[250,3.98]],
+        green: [[1,1.00],[2,1.01],[3,1.06],[4,1.13],[5,1.21],[6,1.30],[8,1.44],[10,1.54],[15,1.70],[20,1.81],[30,1.98],[50,2.22],[90,2.50]],
+    },
+    '10': {
+        tee: [[100,2.72],[150,2.85],[200,3.06],[250,3.28],[300,3.50],[350,3.71],[400,3.90],[450,4.12],[500,4.33],[550,4.57],[600,4.80]],
+        fairway: [[20,2.45],[40,2.55],[60,2.67],[80,2.76],[100,2.85],[120,2.96],[140,3.08],[160,3.21],[180,3.34],[200,3.46],[225,3.62],[250,3.78]],
+        rough: [[20,2.60],[40,2.71],[60,2.84],[80,2.94],[100,3.04],[120,3.16],[140,3.29],[160,3.43],[200,3.69],[250,4.03]],
+        green: [[1,1.00],[2,1.01],[3,1.07],[4,1.15],[5,1.24],[6,1.33],[8,1.47],[10,1.58],[15,1.73],[20,1.84],[30,2.03],[50,2.27],[90,2.55]],
+    },
+    '15': {
+        tee: [[100,2.80],[150,2.95],[200,3.18],[250,3.42],[300,3.65],[350,3.87],[400,4.08],[450,4.30],[500,4.52],[550,4.76],[600,5.00]],
+        fairway: [[20,2.56],[40,2.67],[60,2.80],[80,2.90],[100,3.00],[120,3.12],[140,3.25],[160,3.39],[180,3.52],[200,3.66],[225,3.83],[250,4.00]],
+        rough: [[20,2.72],[40,2.84],[60,2.98],[80,3.10],[100,3.22],[120,3.35],[140,3.50],[160,3.65],[200,3.93],[250,4.30]],
+        green: [[1,1.00],[2,1.02],[3,1.10],[4,1.20],[5,1.31],[6,1.42],[8,1.58],[10,1.70],[15,1.88],[20,2.00],[30,2.20],[50,2.46],[90,2.78]],
+    },
+    '20': {
+        tee: [[100,2.90],[150,3.08],[200,3.33],[250,3.58],[300,3.83],[350,4.06],[400,4.28],[450,4.52],[500,4.75],[550,5.00],[600,5.25]],
+        fairway: [[20,2.70],[40,2.82],[60,2.96],[80,3.08],[100,3.20],[120,3.34],[140,3.48],[160,3.63],[180,3.78],[200,3.93],[225,4.12],[250,4.30]],
+        rough: [[20,2.88],[40,3.01],[60,3.16],[80,3.30],[100,3.44],[120,3.58],[140,3.74],[160,3.90],[200,4.22],[250,4.62]],
+        green: [[1,1.00],[2,1.04],[3,1.14],[4,1.26],[5,1.39],[6,1.52],[8,1.70],[10,1.84],[15,2.04],[20,2.18],[30,2.40],[50,2.70],[90,3.05]],
+    },
+};
+
+function getActiveSgBaseline() {
+    return SG_BASELINES[state.settings?.sg_baseline] ?? SG_BASELINES['10'];
+}
+
+function sgBaselineLabel() {
+    const v = state.settings?.sg_baseline ?? '10';
+    return v === 'scratch' ? t('settings.sg.scratch') : t('settings.sg.handicap', { v });
+}
 
 function interpolateBaseline(table, dist) {
     if (dist <= table[0][0]) return table[0][1];
@@ -2168,10 +2184,11 @@ function interpolateBaseline(table, dist) {
 
 // Expected strokes from a position. lie: 'tee' | 'fairway' | 'rough' | 'green'
 function expectedStrokes(distYards, lie) {
-    if (lie === 'green') return interpolateBaseline(SG_BASELINE_GREEN, distYards * 3); // yards→feet
-    if (lie === 'tee') return interpolateBaseline(SG_BASELINE_TEE, distYards);
-    if (lie === 'rough') return interpolateBaseline(SG_BASELINE_ROUGH, distYards);
-    return interpolateBaseline(SG_BASELINE_FAIRWAY, distYards);
+    const b = getActiveSgBaseline();
+    if (lie === 'green') return interpolateBaseline(b.green, distYards * 3); // yards→feet
+    if (lie === 'tee') return interpolateBaseline(b.tee, distYards);
+    if (lie === 'rough') return interpolateBaseline(b.rough, distYards);
+    return interpolateBaseline(b.fairway, distYards);
 }
 
 // Compute strokes gained for an entire round. Returns { shots: [...], categories: {...} }
@@ -2443,7 +2460,7 @@ function buildStrokesGainedTab(round) {
     ${insightsCard}
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('sg.title')}</h3>
-        <p class="text-xs text-gray-400 mb-4">${t('sg.desc')}</p>
+        <p class="text-xs text-gray-400 mb-4">${t('sg.desc', { baseline: sgBaselineLabel() })}</p>
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             ${totalCard}
             ${catCards}
@@ -3146,6 +3163,7 @@ function renderSetupModal(isFirstRun) {
     const name = state.settings?.player_name ?? '';
     const device = state.settings?.device_source ?? '';
     const lang = getLang();
+    const sgBaseline = state.settings?.sg_baseline ?? '10';
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3197,6 +3215,21 @@ function renderSetupModal(isFirstRun) {
                     </button>
                 </div>
             </div>` : ''}
+            ${!isFirstRun ? `
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">${t('settings.sgbaseline')}</label>
+                <div class="flex gap-2">
+                    ${['scratch','5','10','15','20'].map(v => {
+                        const label = v === 'scratch' ? t('settings.sg.scratch') : t('settings.sg.handicap', {v});
+                        const active = sgBaseline === v;
+                        return `<button class="sg-option flex-1 py-2 rounded-lg border text-xs font-medium transition
+                            ${active ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-sg="${v}">
+                            ${label}
+                        </button>`;
+                    }).join('')}
+                </div>
+                <p class="text-xs text-gray-400 mt-1">${t('settings.sgbaseline.desc')}</p>
+            </div>` : ''}
             <div id="setup-error" class="text-red-500 text-xs text-center hidden">${t('setup.validation')}</div>
             <button id="setup-save-btn"
                 class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
@@ -3209,6 +3242,7 @@ function renderSetupModal(isFirstRun) {
 
     let selectedDevice = device;
     let selectedLang = lang;
+    let selectedSgBaseline = sgBaseline;
 
     modal.querySelectorAll('.device-option').forEach(el => {
         el.addEventListener('click', () => {
@@ -3230,13 +3264,25 @@ function renderSetupModal(isFirstRun) {
         });
     });
 
+    modal.querySelectorAll('.sg-option').forEach(el => {
+        el.addEventListener('click', () => {
+            modal.querySelectorAll('.sg-option').forEach(o => {
+                o.classList.remove('border-blue-500', 'bg-blue-50', 'text-blue-700');
+                o.classList.add('border-gray-200', 'text-gray-600');
+            });
+            el.classList.add('border-blue-500', 'bg-blue-50', 'text-blue-700');
+            el.classList.remove('border-gray-200', 'text-gray-600');
+            selectedSgBaseline = el.dataset.sg;
+        });
+    });
+
     modal.querySelector('#setup-save-btn').addEventListener('click', async () => {
         const playerName = modal.querySelector('#setup-name').value.trim();
         if (!playerName || !selectedDevice) {
             modal.querySelector('#setup-error').classList.remove('hidden');
             return;
         }
-        const settings = { player_name: playerName, device_source: selectedDevice };
+        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline };
         try {
             await saveSettings(settings);
             state.settings = settings;
