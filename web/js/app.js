@@ -3464,6 +3464,7 @@ function initHamburgerMenu() {
 async function showTrendsView() {
     state.activeView = 'trends';
     state.activeId = null;
+    state._trendsFilter = null; // null = all
     renderRoundsList();
 
     const content = document.getElementById('detail-content');
@@ -3471,44 +3472,90 @@ async function showTrendsView() {
     content.classList.remove('hidden');
     empty.classList.add('hidden');
 
-    const summaryRounds = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
-    if (!summaryRounds.length) {
-        content.innerHTML = buildTrendsPage();
+    const allSummary = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+    if (!allSummary.length) {
+        content.innerHTML = buildTrendsPage(allSummary, null);
         return;
     }
 
-    // Show summary sections immediately, load detail sections async
-    content.innerHTML = buildTrendsPage();
-    requestAnimationFrame(() => {
-        renderScoreTrendChart(summaryRounds);
-        renderShortGameTrendChart(summaryRounds);
-        renderFitnessTrendChart(summaryRounds);
-    });
+    // Render with all rounds initially
+    content.innerHTML = buildTrendsPage(allSummary, null);
+    renderTrendsCharts(allSummary);
+    wireTrendsFilter();
 
     // Load light rounds for SG + club trends
     try {
-        const lightRounds = await getAllRoundsLight();
-        if (state.activeView !== 'trends') return; // user navigated away
-
-        const sgSection = document.getElementById('trends-sg-section');
-        const clubSection = document.getElementById('trends-club-section');
-        if (sgSection) {
-            sgSection.innerHTML = buildSgTrends(lightRounds);
-            requestAnimationFrame(() => renderSgTrendChart(lightRounds));
-        }
-        if (clubSection) {
-            // Store lightRounds for club detail interactions
-            state._trendLightRounds = lightRounds;
-            clubSection.innerHTML = buildClubTrends(lightRounds) + `<div id="trends-club-detail"></div>`;
-            wireClubTrendControls(lightRounds);
-        }
+        state._trendLightRounds = await getAllRoundsLight();
+        if (state.activeView !== 'trends') return;
+        renderTrendsDetailSections();
     } catch (e) {
         console.error('Failed to load light rounds for trends:', e);
     }
 }
 
-function buildTrendsPage() {
-    const rounds = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+function wireTrendsFilter() {
+    document.querySelectorAll('.trends-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.trends-filter-btn').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                b.classList.add('border-gray-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('border-gray-300');
+            state._trendsFilter = btn.dataset.n === 'all' ? null : parseInt(btn.dataset.n);
+            rebuildTrends();
+        });
+    });
+}
+
+function rebuildTrends() {
+    const n = state._trendsFilter;
+    const allSummary = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+    const filtered = n ? allSummary.slice(-n) : allSummary;
+
+    // Rebuild summary sections
+    const container = document.getElementById('trends-body');
+    if (!container) return;
+    container.innerHTML = `
+        ${buildScoringTrends(filtered)}
+        ${buildShortGameTrends(filtered)}
+        <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${state._trendLightRounds ? '' : t('detail.loading')}</div></div>
+        <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${state._trendLightRounds ? '' : t('detail.loading')}</div></div>
+        ${buildFitnessTrends(filtered)}`;
+
+    renderTrendsCharts(filtered);
+    if (state._trendLightRounds) renderTrendsDetailSections();
+
+    // Update subtitle count
+    const subtitle = document.getElementById('trends-subtitle');
+    if (subtitle) subtitle.textContent = t('trends.subtitle', { count: filtered.length });
+}
+
+function renderTrendsCharts(summaryRounds) {
+    requestAnimationFrame(() => {
+        renderScoreTrendChart(summaryRounds);
+        renderShortGameTrendChart(summaryRounds);
+        renderFitnessTrendChart(summaryRounds);
+    });
+}
+
+function renderTrendsDetailSections() {
+    const n = state._trendsFilter;
+    const lightRounds = n ? state._trendLightRounds.slice(-n) : state._trendLightRounds;
+
+    const sgSection = document.getElementById('trends-sg-section');
+    const clubSection = document.getElementById('trends-club-section');
+    if (sgSection) {
+        sgSection.innerHTML = buildSgTrends(lightRounds);
+        requestAnimationFrame(() => renderSgTrendChart(lightRounds));
+    }
+    if (clubSection) {
+        clubSection.innerHTML = buildClubTrends(lightRounds);
+        wireClubTrendControls(lightRounds);
+    }
+}
+
+function buildTrendsPage(rounds, filterN) {
     if (!rounds.length) {
         return `<div class="flex flex-col items-center justify-center h-full text-gray-400 py-20">
             <span class="text-5xl mb-4">📊</span>
@@ -3520,13 +3567,25 @@ function buildTrendsPage() {
     <div class="pt-6 pb-6 space-y-6">
         <div class="flex items-center justify-between">
             <h2 class="text-2xl font-bold text-gray-800">📊 ${t('trends.title')}</h2>
-            <span class="text-sm text-gray-400">${t('trends.subtitle', { count: rounds.length })}</span>
+            <div class="flex items-center gap-3">
+                <span id="trends-subtitle" class="text-sm text-gray-400">${t('trends.subtitle', { count: rounds.length })}</span>
+                <div class="flex gap-1">
+                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
+                        ${filterN === 10 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="10">${t('trends.last')} 10</button>
+                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
+                        ${filterN === 20 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="20">${t('trends.last')} 20</button>
+                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
+                        ${filterN == null ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="all">${t('shotmap.all')}</button>
+                </div>
+            </div>
         </div>
-        ${buildScoringTrends(rounds)}
-        ${buildShortGameTrends(rounds)}
-        <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
-        <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
-        ${buildFitnessTrends(rounds)}
+        <div id="trends-body" class="space-y-6">
+            ${buildScoringTrends(rounds)}
+            ${buildShortGameTrends(rounds)}
+            <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+            <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+            ${buildFitnessTrends(rounds)}
+        </div>
     </div>`;
 }
 
@@ -3993,11 +4052,6 @@ function buildClubTrends(lightRounds) {
         <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.clubdetail.title')}</h3>
         <div class="flex items-center gap-3 mb-4 flex-wrap">
             <div class="flex items-center gap-2 flex-wrap">${clubPills}</div>
-            <div class="ml-auto flex gap-1">
-                <button class="round-filter-btn px-3 py-1 text-xs rounded-full border border-gray-300 hover:bg-blue-50 transition" data-n="10">${t('trends.last')} 10</button>
-                <button class="round-filter-btn px-3 py-1 text-xs rounded-full border border-gray-300 hover:bg-blue-50 transition" data-n="20">${t('trends.last')} 20</button>
-                <button class="round-filter-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border-blue-600" data-n="all">${t('shotmap.all')}</button>
-            </div>
         </div>
         <div id="club-detail-charts">
             <div class="grid grid-cols-2 gap-4">
@@ -4013,10 +4067,9 @@ let _clubDirChart = null;
 
 function wireClubTrendControls(lightRounds) {
     let selectedClub = document.querySelector('.club-detail-btn')?.dataset.club;
-    let selectedN = null; // all
 
     function refresh() {
-        renderClubDetailCharts(lightRounds, selectedClub, selectedN);
+        renderClubDetailCharts(lightRounds, selectedClub);
     }
 
     document.querySelectorAll('.club-detail-btn').forEach(btn => {
@@ -4032,24 +4085,11 @@ function wireClubTrendControls(lightRounds) {
         });
     });
 
-    document.querySelectorAll('.round-filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.round-filter-btn').forEach(b => {
-                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
-                b.classList.add('border-gray-300');
-            });
-            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
-            btn.classList.remove('border-gray-300');
-            selectedN = btn.dataset.n === 'all' ? null : parseInt(btn.dataset.n);
-            refresh();
-        });
-    });
-
     if (selectedClub) refresh();
 }
 
-function renderClubDetailCharts(lightRounds, clubName, lastN) {
-    const clubMap = collectClubShots(lightRounds, lastN);
+function renderClubDetailCharts(lightRounds, clubName) {
+    const clubMap = collectClubShots(lightRounds);
     const data = clubMap[clubName];
     if (!data?.shots.length) return;
 
