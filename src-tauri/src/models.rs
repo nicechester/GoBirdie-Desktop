@@ -11,9 +11,15 @@ pub struct Settings {
     pub device_source: String,  // "garmin" | "apple" | "android"
     #[serde(default = "default_tee_color")]
     pub tee_color: String,      // "Black" | "Blue" | "White" | "Yellow" | "Red"
+    #[serde(default = "default_sg_baseline")]
+    pub sg_baseline: String,    // "scratch" | "5" | "10" | "15" | "20"
+    #[serde(default = "default_true")]
+    pub exclude_outliers: bool,
 }
 
 fn default_tee_color() -> String { "Blue".to_string() }
+fn default_sg_baseline() -> String { "10".to_string() }
+fn default_true() -> bool { true }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -21,6 +27,8 @@ impl Default for Settings {
             player_name: String::new(),
             device_source: String::new(),
             tee_color: default_tee_color(),
+            sg_baseline: default_sg_baseline(),
+            exclude_outliers: true,
         }
     }
 }

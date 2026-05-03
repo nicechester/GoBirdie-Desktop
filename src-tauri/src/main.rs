@@ -162,6 +162,11 @@ fn get_all_rounds(state: State<'_, AppState>) -> Vec<RoundSummary> {
 }
 
 #[tauri::command]
+fn get_all_rounds_light(state: State<'_, AppState>) -> Vec<GolfRound> {
+    state.store.lock().unwrap().all_rounds_light()
+}
+
+#[tauri::command]
 fn get_round_detail(id: String, state: State<'_, AppState>) -> Option<GolfRound> {
     state.store.lock().unwrap().load_by_id(&id)
 }
@@ -380,6 +385,7 @@ fn main() {
             sync_rounds,
             import_fit_files,
             get_all_rounds,
+            get_all_rounds_light,
             get_round_detail,
             get_store_stats,
             get_clubs,

@@ -75,6 +75,24 @@ impl Store {
         summaries
     }
 
+    /// Returns all rounds with scorecards but stripped of heavy fields.
+    pub fn all_rounds_light(&self) -> Vec<GolfRound> {
+        let mut rounds: Vec<GolfRound> = self.db.iter()
+            .filter_map(|r| r.ok())
+            .filter_map(|(_, v)| serde_json::from_slice::<GolfRound>(&v).ok())
+            .filter(|r| !r.id.is_empty() && r.scorecard.is_some())
+            .map(|mut r| {
+                r.health_timeline.clear();
+                r.shots.clear();
+                r.tempo_timeline.clear();
+                r.clubs.clear();
+                r
+            })
+            .collect();
+        rounds.sort_by(|a, b| a.start_ts.cmp(&b.start_ts));
+        rounds
+    }
+
     pub fn count(&self) -> usize {
         self.db.len()
     }

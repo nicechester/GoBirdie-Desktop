@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
-import { t, getLang, initLangSelector } from './i18n.js';
+import { t, getLang, setLang } from './i18n.js';
 import maplibregl from 'maplibre-gl';
 
 const PAGE_SIZE = 10;
@@ -9,6 +9,7 @@ const state = {
     rounds: [],
     activeId: null,
     activeTab: 'overview',
+    activeView: 'detail',   // 'detail' | 'trends'
     searchTerm: '',
     syncOffset: 0,
     syncing: false,
@@ -29,6 +30,10 @@ async function getAllRounds() {
 
 async function getRoundDetail(id) {
     return invoke('get_round_detail', { id });
+}
+
+async function getAllRoundsLight() {
+    return invoke('get_all_rounds_light');
 }
 
 async function getStoreStats() {
@@ -223,6 +228,8 @@ function confirmDeleteRound(roundId) {
 // ── Round detail ─────────────────────────────────────────────────────────────
 
 async function loadDetail(id) {
+    state.activeView = 'detail';
+
     // If same round, just switch tab rendering — no re-fetch
     if (state.activeRound?.id === id) {
         renderDetailTabs();
@@ -1002,6 +1009,16 @@ function dirArrowSvg(dev) {
         </svg>
         <div style="font-size:9px;color:#666;margin-top:2px">${label}</div>
     </div>`;
+}
+
+const CLUB_ORDER = [
+    'Driver', '3-Wood', '5-Wood', '7-Wood', 'Hybrid',
+    '2-Iron', '3-Iron', '4-Iron', '5-Iron', '6-Iron', '7-Iron', '8-Iron', '9-Iron',
+    'PW', 'GW', 'SW', 'LW', 'Putter', 'unknown',
+];
+function clubSortKey(name) {
+    const idx = CLUB_ORDER.indexOf(name);
+    return idx >= 0 ? idx : CLUB_ORDER.length;
 }
 
 const CLUB_COLORS = {
@@ -2068,8 +2085,8 @@ function buildClubSummary(enriched) {
         byClub[s.club].push(s);
     });
 
-    const catOrder = ['tee', 'fairway_wood', 'iron', 'wedge', 'unknown'];
     const clubs = Object.entries(byClub)
+        .filter(([, shots]) => shots.length > 0 && shots[0].distYds > 5)
         .map(([name, shots]) => ({
             name,
             cat: shots[0].cat,
@@ -2078,7 +2095,7 @@ function buildClubSummary(enriched) {
             max: Math.max(...shots.map(s => s.distYds)),
             straight: shots.filter(s => Math.abs(s.deviation) < 15).length,
         }))
-        .sort((a, b) => catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat) || b.avg - a.avg);
+        .sort((a, b) => clubSortKey(a.name) - clubSortKey(b.name));
 
     const maxAvg = Math.max(...clubs.map(c => c.avg));
 
@@ -2118,34 +2135,50 @@ function buildClubSummary(enriched) {
 
 // ── Strokes Gained (Broadie / Every Shot Counts) ─────────────────────────────
 
-// Single-digit handicap baseline: expected strokes to hole out from given distance (yards).
-// Sources: Mark Broadie "Every Shot Counts" scratch/single-digit amateur tables, interpolated.
-// Keys: distance in yards → expected strokes. We interpolate between entries.
-const SG_BASELINE_TEE = [
-    // distance, expected strokes (from tee box)
-    [100, 2.72], [125, 2.78], [150, 2.85], [175, 2.94], [200, 3.06],
-    [225, 3.17], [250, 3.28], [275, 3.39], [300, 3.50], [325, 3.61],
-    [350, 3.71], [375, 3.80], [400, 3.90], [425, 4.01], [450, 4.12],
-    [475, 4.22], [500, 4.33], [525, 4.45], [550, 4.57], [575, 4.68], [600, 4.80],
-];
-const SG_BASELINE_FAIRWAY = [
-    // distance, expected strokes (from fairway)
-    [20, 2.45], [30, 2.50], [40, 2.55], [50, 2.61], [60, 2.67],
-    [80, 2.76], [100, 2.85], [120, 2.96], [140, 3.08], [150, 3.15],
-    [160, 3.21], [175, 3.31], [200, 3.46], [225, 3.62], [250, 3.78], [275, 3.94],
-];
-const SG_BASELINE_ROUGH = [
-    // distance, expected strokes (from rough — ~0.15-0.2 penalty over fairway)
-    [20, 2.60], [30, 2.65], [40, 2.71], [50, 2.78], [60, 2.84],
-    [80, 2.94], [100, 3.04], [120, 3.16], [140, 3.29], [150, 3.36],
-    [160, 3.43], [175, 3.53], [200, 3.69], [225, 3.86], [250, 4.03],
-];
-const SG_BASELINE_GREEN = [
-    // distance in feet, expected putts (single-digit: better from short range)
-    [1, 1.00], [2, 1.01], [3, 1.07], [4, 1.15], [5, 1.24],
-    [6, 1.33], [8, 1.47], [10, 1.58], [15, 1.73], [20, 1.84],
-    [25, 1.94], [30, 2.03], [40, 2.16], [50, 2.27], [60, 2.36], [90, 2.55],
-];
+// Expected strokes tables by handicap level.
+// Sources: Mark Broadie "Every Shot Counts" — scratch through 20-hcp amateur tables, interpolated.
+// Each level: { tee, fairway, rough, green } arrays of [distance, expected_strokes].
+const SG_BASELINES = {
+    scratch: {
+        tee: [[100,2.60],[150,2.70],[200,2.87],[250,3.08],[300,3.30],[350,3.52],[400,3.72],[450,3.93],[500,4.15],[550,4.38],[600,4.60]],
+        fairway: [[20,2.30],[40,2.40],[60,2.52],[80,2.62],[100,2.72],[120,2.82],[140,2.94],[160,3.07],[180,3.20],[200,3.32],[225,3.48],[250,3.64]],
+        rough: [[20,2.48],[40,2.58],[60,2.70],[80,2.80],[100,2.92],[120,3.04],[140,3.17],[160,3.30],[200,3.56],[250,3.90]],
+        green: [[1,1.00],[2,1.00],[3,1.04],[4,1.10],[5,1.17],[6,1.25],[8,1.38],[10,1.48],[15,1.63],[20,1.74],[30,1.91],[50,2.14],[90,2.40]],
+    },
+    '5': {
+        tee: [[100,2.66],[150,2.78],[200,2.97],[250,3.18],[300,3.40],[350,3.62],[400,3.82],[450,4.03],[500,4.25],[550,4.48],[600,4.70]],
+        fairway: [[20,2.38],[40,2.48],[60,2.60],[80,2.70],[100,2.80],[120,2.90],[140,3.02],[160,3.15],[180,3.28],[200,3.40],[225,3.56],[250,3.72]],
+        rough: [[20,2.55],[40,2.65],[60,2.78],[80,2.88],[100,2.99],[120,3.11],[140,3.24],[160,3.38],[200,3.64],[250,3.98]],
+        green: [[1,1.00],[2,1.01],[3,1.06],[4,1.13],[5,1.21],[6,1.30],[8,1.44],[10,1.54],[15,1.70],[20,1.81],[30,1.98],[50,2.22],[90,2.50]],
+    },
+    '10': {
+        tee: [[100,2.72],[150,2.85],[200,3.06],[250,3.28],[300,3.50],[350,3.71],[400,3.90],[450,4.12],[500,4.33],[550,4.57],[600,4.80]],
+        fairway: [[20,2.45],[40,2.55],[60,2.67],[80,2.76],[100,2.85],[120,2.96],[140,3.08],[160,3.21],[180,3.34],[200,3.46],[225,3.62],[250,3.78]],
+        rough: [[20,2.60],[40,2.71],[60,2.84],[80,2.94],[100,3.04],[120,3.16],[140,3.29],[160,3.43],[200,3.69],[250,4.03]],
+        green: [[1,1.00],[2,1.01],[3,1.07],[4,1.15],[5,1.24],[6,1.33],[8,1.47],[10,1.58],[15,1.73],[20,1.84],[30,2.03],[50,2.27],[90,2.55]],
+    },
+    '15': {
+        tee: [[100,2.80],[150,2.95],[200,3.18],[250,3.42],[300,3.65],[350,3.87],[400,4.08],[450,4.30],[500,4.52],[550,4.76],[600,5.00]],
+        fairway: [[20,2.56],[40,2.67],[60,2.80],[80,2.90],[100,3.00],[120,3.12],[140,3.25],[160,3.39],[180,3.52],[200,3.66],[225,3.83],[250,4.00]],
+        rough: [[20,2.72],[40,2.84],[60,2.98],[80,3.10],[100,3.22],[120,3.35],[140,3.50],[160,3.65],[200,3.93],[250,4.30]],
+        green: [[1,1.00],[2,1.02],[3,1.10],[4,1.20],[5,1.31],[6,1.42],[8,1.58],[10,1.70],[15,1.88],[20,2.00],[30,2.20],[50,2.46],[90,2.78]],
+    },
+    '20': {
+        tee: [[100,2.90],[150,3.08],[200,3.33],[250,3.58],[300,3.83],[350,4.06],[400,4.28],[450,4.52],[500,4.75],[550,5.00],[600,5.25]],
+        fairway: [[20,2.70],[40,2.82],[60,2.96],[80,3.08],[100,3.20],[120,3.34],[140,3.48],[160,3.63],[180,3.78],[200,3.93],[225,4.12],[250,4.30]],
+        rough: [[20,2.88],[40,3.01],[60,3.16],[80,3.30],[100,3.44],[120,3.58],[140,3.74],[160,3.90],[200,4.22],[250,4.62]],
+        green: [[1,1.00],[2,1.04],[3,1.14],[4,1.26],[5,1.39],[6,1.52],[8,1.70],[10,1.84],[15,2.04],[20,2.18],[30,2.40],[50,2.70],[90,3.05]],
+    },
+};
+
+function getActiveSgBaseline() {
+    return SG_BASELINES[state.settings?.sg_baseline] ?? SG_BASELINES['10'];
+}
+
+function sgBaselineLabel() {
+    const v = state.settings?.sg_baseline ?? '10';
+    return v === 'scratch' ? t('settings.sg.scratch') : t('settings.sg.handicap', { v });
+}
 
 function interpolateBaseline(table, dist) {
     if (dist <= table[0][0]) return table[0][1];
@@ -2161,10 +2194,11 @@ function interpolateBaseline(table, dist) {
 
 // Expected strokes from a position. lie: 'tee' | 'fairway' | 'rough' | 'green'
 function expectedStrokes(distYards, lie) {
-    if (lie === 'green') return interpolateBaseline(SG_BASELINE_GREEN, distYards * 3); // yards→feet
-    if (lie === 'tee') return interpolateBaseline(SG_BASELINE_TEE, distYards);
-    if (lie === 'rough') return interpolateBaseline(SG_BASELINE_ROUGH, distYards);
-    return interpolateBaseline(SG_BASELINE_FAIRWAY, distYards);
+    const b = getActiveSgBaseline();
+    if (lie === 'green') return interpolateBaseline(b.green, distYards * 3); // yards→feet
+    if (lie === 'tee') return interpolateBaseline(b.tee, distYards);
+    if (lie === 'rough') return interpolateBaseline(b.rough, distYards);
+    return interpolateBaseline(b.fairway, distYards);
 }
 
 // Compute strokes gained for an entire round. Returns { shots: [...], categories: {...} }
@@ -2436,7 +2470,7 @@ function buildStrokesGainedTab(round) {
     ${insightsCard}
     <div class="bg-white rounded-xl shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('sg.title')}</h3>
-        <p class="text-xs text-gray-400 mb-4">${t('sg.desc')}</p>
+        <p class="text-xs text-gray-400 mb-4">${t('sg.desc', { baseline: sgBaselineLabel() })}</p>
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             ${totalCard}
             ${catCards}
@@ -2543,7 +2577,7 @@ function buildClubAnalysis(round, sg) {
 
             return { name, shots: shots.length, avgDist, distStd, avgDev, devStd, avgSg, left, right, straight, tendency, consistency };
         })
-        .sort((a, b) => b.avgDist - a.avgDist);
+        .sort((a, b) => clubSortKey(a.name) - clubSortKey(b.name));
 
     if (!clubs.length) return '';
 
@@ -3138,6 +3172,9 @@ function renderSetupModal(isFirstRun) {
     const modal = document.getElementById('setup-modal');
     const name = state.settings?.player_name ?? '';
     const device = state.settings?.device_source ?? '';
+    const lang = getLang();
+    const sgBaseline = state.settings?.sg_baseline ?? '10';
+    const excludeOutliers = state.settings?.exclude_outliers ?? true;
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3175,6 +3212,44 @@ function renderSetupModal(isFirstRun) {
                     </div>
                 </div>
             </div>
+            ${!isFirstRun ? `
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">${t('settings.language')}</label>
+                <div class="flex gap-3">
+                    <button class="lang-option flex-1 py-2 rounded-lg border text-sm font-medium transition
+                        ${lang === 'en' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-lang="en">
+                        🇺🇸 English
+                    </button>
+                    <button class="lang-option flex-1 py-2 rounded-lg border text-sm font-medium transition
+                        ${lang === 'ko' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-lang="ko">
+                        🇰🇷 한국어
+                    </button>
+                </div>
+            </div>` : ''}
+            ${!isFirstRun ? `
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">${t('settings.sgbaseline')}</label>
+                <div class="flex gap-2">
+                    ${['scratch','5','10','15','20'].map(v => {
+                        const label = v === 'scratch' ? t('settings.sg.scratch') : t('settings.sg.handicap', {v});
+                        const active = sgBaseline === v;
+                        return `<button class="sg-option flex-1 py-2 rounded-lg border text-xs font-medium transition
+                            ${active ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-sg="${v}">
+                            ${label}
+                        </button>`;
+                    }).join('')}
+                </div>
+                <p class="text-xs text-gray-400 mt-1">${t('settings.sgbaseline.desc')}</p>
+            </div>` : ''}
+            ${!isFirstRun ? `
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="setup-outliers" ${excludeOutliers ? 'checked' : ''}
+                        class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm font-medium text-gray-700">${t('settings.outliers')}</span>
+                </label>
+                <p class="text-xs text-gray-400 mt-1 ml-6">${t('settings.outliers.desc')}</p>
+            </div>` : ''}
             <div id="setup-error" class="text-red-500 text-xs text-center hidden">${t('setup.validation')}</div>
             <button id="setup-save-btn"
                 class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
@@ -3186,6 +3261,8 @@ function renderSetupModal(isFirstRun) {
     modal.classList.remove('hidden');
 
     let selectedDevice = device;
+    let selectedLang = lang;
+    let selectedSgBaseline = sgBaseline;
 
     modal.querySelectorAll('.device-option').forEach(el => {
         el.addEventListener('click', () => {
@@ -3195,16 +3272,45 @@ function renderSetupModal(isFirstRun) {
         });
     });
 
+    modal.querySelectorAll('.lang-option').forEach(el => {
+        el.addEventListener('click', () => {
+            modal.querySelectorAll('.lang-option').forEach(o => {
+                o.classList.remove('border-blue-500', 'bg-blue-50', 'text-blue-700');
+                o.classList.add('border-gray-200', 'text-gray-600');
+            });
+            el.classList.add('border-blue-500', 'bg-blue-50', 'text-blue-700');
+            el.classList.remove('border-gray-200', 'text-gray-600');
+            selectedLang = el.dataset.lang;
+        });
+    });
+
+    modal.querySelectorAll('.sg-option').forEach(el => {
+        el.addEventListener('click', () => {
+            modal.querySelectorAll('.sg-option').forEach(o => {
+                o.classList.remove('border-blue-500', 'bg-blue-50', 'text-blue-700');
+                o.classList.add('border-gray-200', 'text-gray-600');
+            });
+            el.classList.add('border-blue-500', 'bg-blue-50', 'text-blue-700');
+            el.classList.remove('border-gray-200', 'text-gray-600');
+            selectedSgBaseline = el.dataset.sg;
+        });
+    });
+
     modal.querySelector('#setup-save-btn').addEventListener('click', async () => {
         const playerName = modal.querySelector('#setup-name').value.trim();
         if (!playerName || !selectedDevice) {
             modal.querySelector('#setup-error').classList.remove('hidden');
             return;
         }
-        const settings = { player_name: playerName, device_source: selectedDevice };
+        const outliers = modal.querySelector('#setup-outliers')?.checked ?? true;
+        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline, exclude_outliers: outliers };
         try {
             await saveSettings(settings);
             state.settings = settings;
+            if (selectedLang !== getLang()) {
+                setLang(selectedLang);
+                onLangChange();
+            }
             modal.classList.add('hidden');
             applySyncButtonVisibility();
             if (isFirstRun) {
@@ -3339,6 +3445,766 @@ async function updateStats() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
+// ── Hamburger Menu ───────────────────────────────────────────────────────────
+
+function initHamburgerMenu() {
+    const btn = document.getElementById('hamburger-btn');
+    const menu = document.getElementById('hamburger-menu');
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', () => menu.classList.add('hidden'));
+
+    document.getElementById('menu-trends').addEventListener('click', () => {
+        menu.classList.add('hidden');
+        showTrendsView();
+    });
+
+    document.getElementById('menu-settings').addEventListener('click', () => {
+        menu.classList.add('hidden');
+        renderSetupModal(false);
+    });
+}
+
+// ── Trends View ──────────────────────────────────────────────────────────────
+
+async function showTrendsView() {
+    state.activeView = 'trends';
+    state.activeId = null;
+    state._trendsFilter = null; // null = all
+    renderRoundsList();
+
+    const content = document.getElementById('detail-content');
+    const empty = document.getElementById('detail-empty');
+    content.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    const allSummary = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+    if (!allSummary.length) {
+        content.innerHTML = buildTrendsPage(allSummary, null);
+        return;
+    }
+
+    // Render with all rounds initially
+    content.innerHTML = buildTrendsPage(allSummary, null);
+    renderTrendsCharts(allSummary);
+    wireTrendsFilter();
+
+    // Load light rounds for SG + club trends
+    try {
+        state._trendLightRounds = await getAllRoundsLight();
+        if (state.activeView !== 'trends') return;
+        renderTrendsDetailSections();
+    } catch (e) {
+        console.error('Failed to load light rounds for trends:', e);
+    }
+}
+
+function wireTrendsFilter() {
+    document.querySelectorAll('.trends-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.trends-filter-btn').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                b.classList.add('border-gray-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('border-gray-300');
+            state._trendsFilter = btn.dataset.n === 'all' ? null : parseInt(btn.dataset.n);
+            rebuildTrends();
+        });
+    });
+}
+
+function rebuildTrends() {
+    const n = state._trendsFilter;
+    const allSummary = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
+    const filtered = n ? allSummary.slice(-n) : allSummary;
+
+    // Rebuild summary sections
+    const container = document.getElementById('trends-body');
+    if (!container) return;
+    container.innerHTML = `
+        ${buildScoringTrends(filtered)}
+        ${buildShortGameTrends(filtered)}
+        <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${state._trendLightRounds ? '' : t('detail.loading')}</div></div>
+        <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${state._trendLightRounds ? '' : t('detail.loading')}</div></div>
+        ${buildFitnessTrends(filtered)}`;
+
+    renderTrendsCharts(filtered);
+    if (state._trendLightRounds) renderTrendsDetailSections();
+
+    // Update subtitle count
+    const subtitle = document.getElementById('trends-subtitle');
+    if (subtitle) subtitle.textContent = t('trends.subtitle', { count: filtered.length });
+}
+
+function renderTrendsCharts(summaryRounds) {
+    requestAnimationFrame(() => {
+        renderScoreTrendChart(summaryRounds);
+        renderShortGameTrendChart(summaryRounds);
+        renderFitnessTrendChart(summaryRounds);
+    });
+}
+
+function renderTrendsDetailSections() {
+    const n = state._trendsFilter;
+    const lightRounds = n ? state._trendLightRounds.slice(-n) : state._trendLightRounds;
+
+    const sgSection = document.getElementById('trends-sg-section');
+    const clubSection = document.getElementById('trends-club-section');
+    if (sgSection) {
+        sgSection.innerHTML = buildSgTrends(lightRounds);
+        requestAnimationFrame(() => renderSgTrendChart(lightRounds));
+    }
+    if (clubSection) {
+        clubSection.innerHTML = buildClubTrends(lightRounds);
+        wireClubTrendControls(lightRounds);
+    }
+}
+
+function buildTrendsPage(rounds, filterN) {
+    if (!rounds.length) {
+        return `<div class="flex flex-col items-center justify-center h-full text-gray-400 py-20">
+            <span class="text-5xl mb-4">📊</span>
+            <p class="text-lg">${t('trends.nodata')}</p>
+        </div>`;
+    }
+
+    return `
+    <div class="pt-6 pb-6 space-y-6">
+        <div class="flex items-center justify-between">
+            <h2 class="text-2xl font-bold text-gray-800">📊 ${t('trends.title')}</h2>
+            <div class="flex items-center gap-3">
+                <span id="trends-subtitle" class="text-sm text-gray-400">${t('trends.subtitle', { count: rounds.length })}</span>
+                <div class="flex gap-1">
+                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
+                        ${filterN === 10 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="10">${t('trends.last')} 10</button>
+                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
+                        ${filterN === 20 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="20">${t('trends.last')} 20</button>
+                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
+                        ${filterN == null ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="all">${t('shotmap.all')}</button>
+                </div>
+            </div>
+        </div>
+        <div id="trends-body" class="space-y-6">
+            ${buildScoringTrends(rounds)}
+            ${buildShortGameTrends(rounds)}
+            <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+            <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+            ${buildFitnessTrends(rounds)}
+        </div>
+    </div>`;
+}
+
+function buildScoringTrends(rounds) {
+    const scores = rounds.map(r => r.total_score);
+    const overPars = rounds.map(r => r.score_over_par);
+    const best = Math.min(...scores);
+    const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 10) / 10;
+    const avgOverPar = Math.round(overPars.reduce((a, b) => a + b, 0) / overPars.length * 10) / 10;
+    const recent5 = scores.slice(-5);
+    const earlier5 = scores.slice(-10, -5);
+    let trendArrow = '→';
+    if (recent5.length >= 3 && earlier5.length >= 3) {
+        const recentAvg = recent5.reduce((a, b) => a + b, 0) / recent5.length;
+        const earlierAvg = earlier5.reduce((a, b) => a + b, 0) / earlier5.length;
+        if (recentAvg < earlierAvg - 1) trendArrow = '↓';
+        else if (recentAvg > earlierAvg + 1) trendArrow = '↑';
+    }
+    const trendColor = trendArrow === '↓' ? 'text-green-600' : trendArrow === '↑' ? 'text-red-600' : 'text-gray-500';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.scoring')}</h3>
+        <div class="grid grid-cols-4 gap-4 mb-4 text-center">
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-700">${best}</div>
+                <div class="text-xs text-gray-500">${t('trends.best')}</div>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-blue-700">${avg}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgscore')}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold ${avgOverPar > 0 ? 'text-red-600' : 'text-green-600'}">${avgOverPar > 0 ? '+' : ''}${avgOverPar}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgoverpar')}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold ${trendColor}">${trendArrow}</div>
+                <div class="text-xs text-gray-500">${t('trends.trend')}</div>
+            </div>
+        </div>
+        <div style="height:220px"><canvas id="score-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderScoreTrendChart(rounds) {
+    const canvas = document.getElementById('score-trend-chart');
+    if (!canvas) return;
+    const labels = rounds.map(r => r.date.slice(5));
+    const overPars = rounds.map(r => r.score_over_par);
+    // 5-round moving average
+    const ma = overPars.map((_, i) => {
+        const start = Math.max(0, i - 4);
+        const slice = overPars.slice(start, i + 1);
+        return +(slice.reduce((a, b) => a + b, 0) / slice.length).toFixed(1);
+    });
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: t('trends.overpar'),
+                    data: overPars,
+                    borderColor: 'rgb(239,68,68)',
+                    backgroundColor: overPars.map(v => v <= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)'),
+                    borderWidth: 1.5,
+                    pointRadius: 4,
+                    pointStyle: 'circle',
+                    tension: 0.3,
+                },
+                {
+                    label: t('trends.movingavg'),
+                    data: ma,
+                    borderColor: 'rgb(99,102,241)',
+                    borderWidth: 2,
+                    borderDash: [6, 3],
+                    pointRadius: 0,
+                    tension: 0.4,
+                },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y > 0 ? '+' : ''}${ctx.parsed.y}` } },
+            },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                y: { title: { display: true, text: t('trends.overpar'), font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => v > 0 ? `+${v}` : v } },
+            }
+        }
+    });
+}
+
+function buildShortGameTrends(rounds) {
+    const totalPutts = rounds.reduce((a, r) => a + r.total_putts, 0);
+    const totalHoles = rounds.reduce((a, r) => a + r.holes_played, 0);
+    const avgPuttsPerHole = totalHoles > 0 ? (totalPutts / totalHoles).toFixed(1) : '—';
+    const avgGir = totalHoles > 0 ? Math.round(rounds.reduce((a, r) => a + r.gir, 0) / rounds.length * 10) / 10 : '—';
+    const avgFir = rounds.length > 0 ? Math.round(rounds.reduce((a, r) => a + r.fairways_hit, 0) / rounds.length * 10) / 10 : '—';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.shortgame')}</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-blue-700">${avgPuttsPerHole}</div>
+                <div class="text-xs text-gray-500">${t('trends.puttsperhole')}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-700">${avgGir}</div>
+                <div class="text-xs text-gray-500">${t('trends.avggir')}</div>
+            </div>
+            <div class="bg-yellow-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-yellow-700">${avgFir}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgfir')}</div>
+            </div>
+        </div>
+        <div style="height:220px"><canvas id="shortgame-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderShortGameTrendChart(rounds) {
+    const canvas = document.getElementById('shortgame-trend-chart');
+    if (!canvas) return;
+    const labels = rounds.map(r => r.date.slice(5));
+    const putts = rounds.map(r => r.total_putts);
+    const gir = rounds.map(r => r.gir);
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: t('trends.putts'),
+                    data: putts,
+                    borderColor: 'rgb(59,130,246)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yPutts',
+                },
+                {
+                    label: 'GIR',
+                    data: gir,
+                    borderColor: 'rgb(34,197,94)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yGir',
+                },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                yPutts: { type: 'linear', position: 'left', title: { display: true, text: t('trends.putts'), font: { size: 11 } }, ticks: { font: { size: 10 } } },
+                yGir: { type: 'linear', position: 'right', title: { display: true, text: 'GIR', font: { size: 11 } }, ticks: { font: { size: 10 } }, grid: { drawOnChartArea: false } },
+            }
+        }
+    });
+}
+
+function buildFitnessTrends(rounds) {
+    const hrRounds = rounds.filter(r => r.avg_heart_rate);
+    const avgHr = hrRounds.length ? Math.round(hrRounds.reduce((a, r) => a + r.avg_heart_rate, 0) / hrRounds.length) : '—';
+    const calRounds = rounds.filter(r => r.calories);
+    const avgCal = calRounds.length ? Math.round(calRounds.reduce((a, r) => a + r.calories, 0) / calRounds.length) : '—';
+    const tempoRounds = rounds.filter(r => r.avg_swing_tempo);
+    const avgTempo = tempoRounds.length ? (tempoRounds.reduce((a, r) => a + r.avg_swing_tempo, 0) / tempoRounds.length).toFixed(1) : '—';
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.fitness')}</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-red-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-red-600">${avgHr}</div>
+                <div class="text-xs text-gray-500">${t('trends.avghr')}</div>
+            </div>
+            <div class="bg-orange-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-orange-600">${avgCal}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgcal')}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-xl font-bold text-green-600">${avgTempo !== '—' ? avgTempo + ':1' : '—'}</div>
+                <div class="text-xs text-gray-500">${t('trends.avgtempo')}</div>
+            </div>
+        </div>
+        <div style="height:220px"><canvas id="fitness-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderFitnessTrendChart(rounds) {
+    const canvas = document.getElementById('fitness-trend-chart');
+    if (!canvas) return;
+    const labels = rounds.map(r => r.date.slice(5));
+    const hr = rounds.map(r => r.avg_heart_rate ?? null);
+    const cal = rounds.map(r => r.calories ?? null);
+    const tempo = rounds.map(r => r.avg_swing_tempo ? +r.avg_swing_tempo.toFixed(2) : null);
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: t('trends.hr'),
+                    data: hr,
+                    borderColor: 'rgb(239,68,68)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yHr',
+                    spanGaps: true,
+                },
+                {
+                    label: t('trends.calories'),
+                    data: cal,
+                    borderColor: 'rgb(249,115,22)',
+                    borderWidth: 1.5,
+                    pointRadius: 3,
+                    tension: 0.3,
+                    yAxisID: 'yCal',
+                    spanGaps: true,
+                },
+                {
+                    label: t('trends.tempo'),
+                    data: tempo,
+                    borderColor: 'rgb(16,185,129)',
+                    borderWidth: 0,
+                    pointRadius: 4,
+                    showLine: false,
+                    yAxisID: 'yTempo',
+                    spanGaps: false,
+                },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                yHr: { type: 'linear', position: 'left', title: { display: true, text: t('trends.hr'), font: { size: 11 } }, ticks: { font: { size: 10 } } },
+                yCal: { type: 'linear', position: 'right', title: { display: true, text: t('trends.calories'), font: { size: 11 } }, ticks: { font: { size: 10 } }, grid: { drawOnChartArea: false } },
+                yTempo: { type: 'linear', position: 'right', display: false, min: 1.5, max: 6.0 },
+            }
+        }
+    });
+}
+
+// ── SG Trends (uses light rounds with scorecards) ────────────────────────────
+
+function computeSgForRound(round) {
+    // Reuse existing computeStrokesGained which works on any round with scorecard
+    return computeStrokesGained(round);
+}
+
+function buildSgTrends(lightRounds) {
+    const sgData = lightRounds
+        .map(r => ({ round: r, sg: computeSgForRound(r) }))
+        .filter(d => d.sg != null);
+
+    if (sgData.length < 2) {
+        return `<div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('trends.sg.nodata')}</div>`;
+    }
+
+    const avgTotal = sgData.reduce((a, d) => a + d.sg.total, 0) / sgData.length;
+    const cats = ['off_tee', 'approach', 'short_game', 'putting'];
+    const catAvgs = {};
+    cats.forEach(c => {
+        catAvgs[c] = sgData.reduce((a, d) => a + d.sg.categories[c], 0) / sgData.length;
+    });
+    const strongest = cats.reduce((a, b) => catAvgs[a] > catAvgs[b] ? a : b);
+    const weakest = cats.reduce((a, b) => catAvgs[a] < catAvgs[b] ? a : b);
+    const catLabels = { off_tee: t('sg.offtee'), approach: t('sg.approach'), short_game: t('sg.shortgame'), putting: t('sg.putting') };
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">${t('trends.sg.title')}</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4 text-center">
+            <div class="bg-gray-50 rounded-lg p-3">
+                <div class="text-xl font-bold" style="color:${sgColor(avgTotal)}">${avgTotal >= 0 ? '+' : ''}${avgTotal.toFixed(1)}</div>
+                <div class="text-xs text-gray-500">${t('trends.sg.avgtotal')}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3">
+                <div class="text-lg font-bold text-green-700">${catLabels[strongest]}</div>
+                <div class="text-xs text-gray-500">${t('trends.sg.strongest')}</div>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3">
+                <div class="text-lg font-bold text-red-700">${catLabels[weakest]}</div>
+                <div class="text-xs text-gray-500">${t('trends.sg.weakest')}</div>
+            </div>
+        </div>
+        <div style="height:240px"><canvas id="sg-trend-chart"></canvas></div>
+    </div>`;
+}
+
+function renderSgTrendChart(lightRounds) {
+    const canvas = document.getElementById('sg-trend-chart');
+    if (!canvas) return;
+
+    const sgData = lightRounds
+        .map(r => ({ round: r, sg: computeSgForRound(r) }))
+        .filter(d => d.sg != null);
+
+    const labels = sgData.map(d => {
+        const dt = new Date((d.round.start_ts + GARMIN_EPOCH) * 1000);
+        return `${dt.getMonth()+1}/${dt.getDate()}`;
+    });
+
+    const colors = {
+        off_tee: 'rgb(239,68,68)',
+        approach: 'rgb(59,130,246)',
+        short_game: 'rgb(234,179,8)',
+        putting: 'rgb(16,185,129)',
+    };
+    const catLabels = { off_tee: t('sg.offtee'), approach: t('sg.approach'), short_game: t('sg.shortgame'), putting: t('sg.putting') };
+
+    const datasets = Object.entries(colors).map(([cat, color]) => ({
+        label: catLabels[cat],
+        data: sgData.map(d => +d.sg.categories[cat].toFixed(2)),
+        borderColor: color,
+        borderWidth: 1.5,
+        pointRadius: 3,
+        tension: 0.3,
+    }));
+
+    new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y}` } },
+            },
+            scales: {
+                x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                y: { title: { display: true, text: 'SG', font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => v >= 0 ? `+${v}` : v } },
+            }
+        }
+    });
+}
+
+// ── Club Trends (uses light rounds with scorecards) ──────────────────────────
+
+function filterOutliers(distances) {
+    if (!state.settings?.exclude_outliers || distances.length < 4) {
+        return { normal: distances, excluded: [] };
+    }
+    const sorted = [...distances].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+    const lower = q1 - 1.5 * iqr;
+    const upper = q3 + 1.5 * iqr;
+    return {
+        normal: distances.filter(d => d >= lower && d <= upper),
+        excluded: distances.filter(d => d < lower || d > upper),
+    };
+}
+
+// Collect per-shot data from light rounds, optionally limited to last N rounds
+function collectClubShots(lightRounds, lastN) {
+    const rounds = lastN ? lightRounds.slice(-lastN) : lightRounds;
+    const clubMap = {};
+    rounds.forEach(r => {
+        const sc = r.scorecard;
+        if (!sc?.hole_scores?.length) return;
+        const dt = new Date((r.start_ts + GARMIN_EPOCH) * 1000);
+        const dateLabel = `${dt.getMonth()+1}/${dt.getDate()}`;
+        sc.hole_scores.forEach(hs => {
+            const shots = hs.shots;
+            if (!shots.length) return;
+            const green = shots[shots.length - 1].to;
+            shots.forEach(shot => {
+                const cat = shot.club_category ?? 'unknown';
+                if (cat === 'putt') return;
+                const name = shot.club_name ?? cat;
+                const dist = metersToYards(distMeters(shot.from, shot.to));
+                const shotBear = bearing(shot.from, shot.to);
+                const greenBear = bearing(shot.from, green);
+                const dev = deviation(shotBear, greenBear);
+                if (!clubMap[name]) clubMap[name] = { cat, shots: [] };
+                clubMap[name].shots.push({ distYds: dist, dev, dateLabel, roundTs: r.start_ts });
+            });
+        });
+    });
+    return clubMap;
+}
+
+function buildClubTrends(lightRounds) {
+    const clubMap = collectClubShots(lightRounds);
+    const clubs = Object.entries(clubMap)
+        .filter(([, v]) => v.shots.length >= 3)
+        .map(([name, v]) => {
+            const dists = v.shots.map(s => s.distYds);
+            const { normal, excluded } = filterOutliers(dists);
+            const avg = normal.length ? Math.round(normal.reduce((a, b) => a + b, 0) / normal.length) : 0;
+            const max = normal.length ? Math.round(Math.max(...normal)) : 0;
+            const straight = v.shots.filter(s => Math.abs(s.dev) < 15).length;
+            return { name, cat: v.cat, shots: v.shots.length, avg, max, excluded: excluded.length, straightPct: Math.round(straight / v.shots.length * 100) };
+        })
+        .sort((a, b) => clubSortKey(a.name) - clubSortKey(b.name));
+
+    if (!clubs.length) {
+        return `<div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('trends.club.nodata')}</div>`;
+    }
+
+    const maxAvg = Math.max(...clubs.map(c => c.avg));
+    const rows = clubs.map(c => {
+        const exclNote = c.excluded > 0 ? `<span class="text-xs text-gray-400 ml-1">(${c.excluded} ${t('trends.club.excl')})</span>` : '';
+        return `
+        <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-2 text-sm font-medium">${c.name}</td>
+            <td class="py-2 text-xs text-gray-400 text-center">${c.shots}</td>
+            <td class="py-2">
+                <div class="flex items-center gap-2">
+                    <div class="w-24 bg-gray-100 rounded-full h-2">
+                        <div class="bg-blue-500 h-2 rounded-full" style="width:${(c.avg/maxAvg*100).toFixed(0)}%"></div>
+                    </div>
+                    <span class="text-sm font-medium">${c.avg} yds</span>
+                    ${exclNote}
+                </div>
+            </td>
+            <td class="py-2 text-xs text-gray-400">${c.max} yds</td>
+            <td class="py-2 text-xs ${c.straightPct >= 60 ? 'text-green-600' : 'text-gray-400'}">${c.straightPct}%</td>
+        </tr>`;
+    }).join('');
+
+    // Club pills for detail section
+    const clubNames = clubs.map(c => c.name);
+    const clubPills = clubNames.map((n, i) => `
+        <button class="club-detail-btn px-3 py-1 text-xs rounded-full border transition
+            ${i === 0 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50 hover:border-blue-400'}" data-club="${n}">
+            ${n}
+        </button>`).join('');
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.club.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('trends.club.desc')}</p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-xs text-gray-400 border-b">
+                    <th class="text-left py-1">${t('stats.club')}</th>
+                    <th class="text-center py-1">${t('scorecard.shots')}</th>
+                    <th class="text-left py-1">${t('trends.club.avgdist')}</th>
+                    <th class="text-left py-1">Max</th>
+                    <th class="text-left py-1">${t('stats.straightpct')}</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-6 mt-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.clubdetail.title')}</h3>
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap">${clubPills}</div>
+        </div>
+        <div id="club-detail-charts">
+            <div class="grid grid-cols-2 gap-4">
+                <div style="height:220px"><canvas id="club-dist-chart"></canvas></div>
+                <div style="height:220px"><canvas id="club-dir-chart"></canvas></div>
+            </div>
+        </div>
+    </div>`;
+}
+
+let _clubDistChart = null;
+let _clubDirChart = null;
+
+function wireClubTrendControls(lightRounds) {
+    let selectedClub = document.querySelector('.club-detail-btn')?.dataset.club;
+
+    function refresh() {
+        renderClubDetailCharts(lightRounds, selectedClub);
+    }
+
+    document.querySelectorAll('.club-detail-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.club-detail-btn').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                b.classList.add('border-gray-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('border-gray-300');
+            selectedClub = btn.dataset.club;
+            refresh();
+        });
+    });
+
+    if (selectedClub) refresh();
+}
+
+function renderClubDetailCharts(lightRounds, clubName) {
+    const clubMap = collectClubShots(lightRounds);
+    const data = clubMap[clubName];
+    if (!data?.shots.length) return;
+
+    // Group shots by round date
+    const byRound = {};
+    data.shots.forEach(s => {
+        const key = s.dateLabel;
+        if (!byRound[key]) byRound[key] = { dists: [], devs: [], ts: s.roundTs };
+        byRound[key].dists.push(s.distYds);
+        byRound[key].devs.push(s.dev);
+    });
+
+    const roundKeys = Object.keys(byRound).sort((a, b) => byRound[a].ts - byRound[b].ts);
+    const labels = roundKeys;
+    const avgDists = roundKeys.map(k => {
+        const { normal } = filterOutliers(byRound[k].dists);
+        return normal.length ? Math.round(normal.reduce((a, b) => a + b, 0) / normal.length) : null;
+    });
+    const avgDevs = roundKeys.map(k => {
+        const devs = byRound[k].devs;
+        return devs.length ? Math.round(devs.reduce((a, b) => a + b, 0) / devs.length) : null;
+    });
+    const straightPcts = roundKeys.map(k => {
+        const devs = byRound[k].devs;
+        return devs.length ? Math.round(devs.filter(d => Math.abs(d) < 15).length / devs.length * 100) : null;
+    });
+
+    // Distance chart
+    if (_clubDistChart) _clubDistChart.destroy();
+    const distCanvas = document.getElementById('club-dist-chart');
+    if (distCanvas) {
+        _clubDistChart = new Chart(distCanvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: `${clubName} ${t('trends.club.avgdist')}`,
+                    data: avgDists,
+                    borderColor: 'rgb(59,130,246)',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    tension: 0.3,
+                    spanGaps: true,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                    y: { title: { display: true, text: t('stats.dist') + ' (yds)', font: { size: 11 } }, ticks: { font: { size: 10 } } },
+                }
+            }
+        });
+    }
+
+    // Direction chart
+    if (_clubDirChart) _clubDirChart.destroy();
+    const dirCanvas = document.getElementById('club-dir-chart');
+    if (dirCanvas) {
+        _clubDirChart = new Chart(dirCanvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: t('trends.clubdetail.avgdev'),
+                        data: avgDevs,
+                        backgroundColor: avgDevs.map(v => v == null ? 'transparent' : v > 10 ? 'rgba(249,115,22,0.6)' : v < -10 ? 'rgba(59,130,246,0.6)' : 'rgba(34,197,94,0.6)'),
+                        borderRadius: 3,
+                        yAxisID: 'yDev',
+                    },
+                    {
+                        label: t('stats.straightpct'),
+                        data: straightPcts,
+                        type: 'line',
+                        borderColor: 'rgb(34,197,94)',
+                        borderWidth: 1.5,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        yAxisID: 'yPct',
+                        spanGaps: true,
+                    },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                scales: {
+                    x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+                    yDev: { type: 'linear', position: 'left', title: { display: true, text: t('trends.clubdetail.deviation'), font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => `${v > 0 ? '+' : ''}${v}°` } },
+                    yPct: { type: 'linear', position: 'right', min: 0, max: 100, title: { display: true, text: t('stats.straightpct'), font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => `${v}%` }, grid: { drawOnChartArea: false } },
+                }
+            }
+        });
+    }
+}
+
+function onLangChange() {
+    applyStaticTranslations();
+    renderRoundsList();
+    if (state.activeView === 'trends') showTrendsView();
+    else if (state.activeRound) renderDetailTabs();
+    updateStats();
+}
+
 async function init() {
     document.getElementById('sync-btn').addEventListener('click', handleSync);
     document.getElementById('apple-sync-btn')?.addEventListener('click', handleAppleSync);
@@ -3348,18 +4214,7 @@ async function init() {
         renderRoundsList();
     });
 
-    // Settings gear button
-    document.getElementById('settings-btn').addEventListener('click', () => {
-        renderSetupModal(false);
-    });
-
-    // Language selector
-    initLangSelector(() => {
-        applyStaticTranslations();
-        renderRoundsList();
-        if (state.activeRound) renderDetailTabs();
-        updateStats();
-    });
+    initHamburgerMenu();
     applyStaticTranslations();
 
     // Check first-run: load settings
@@ -3396,6 +4251,8 @@ function applyStaticTranslations() {
     document.getElementById('app-title').textContent = t('app.title');
     document.getElementById('sync-label').textContent = state.syncing ? t('sync.syncing') : t('sync.label');
     document.getElementById('search-input').placeholder = t('search.placeholder');
+    document.getElementById('menu-trends-label').textContent = t('menu.trends');
+    document.getElementById('menu-settings-label').textContent = t('menu.settings');
 }
 
 if (document.readyState === 'loading') {
