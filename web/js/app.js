@@ -1011,6 +1011,16 @@ function dirArrowSvg(dev) {
     </div>`;
 }
 
+const CLUB_ORDER = [
+    'Driver', '3-Wood', '5-Wood', '7-Wood', 'Hybrid',
+    '2-Iron', '3-Iron', '4-Iron', '5-Iron', '6-Iron', '7-Iron', '8-Iron', '9-Iron',
+    'PW', 'GW', 'SW', 'LW', 'Putter', 'unknown',
+];
+function clubSortKey(name) {
+    const idx = CLUB_ORDER.indexOf(name);
+    return idx >= 0 ? idx : CLUB_ORDER.length;
+}
+
 const CLUB_COLORS = {
     tee:          '#ef4444',  // red
     fairway_wood: '#f97316',  // orange
@@ -2075,8 +2085,8 @@ function buildClubSummary(enriched) {
         byClub[s.club].push(s);
     });
 
-    const catOrder = ['tee', 'fairway_wood', 'iron', 'wedge', 'unknown'];
     const clubs = Object.entries(byClub)
+        .filter(([, shots]) => shots.length > 0 && shots[0].distYds > 5)
         .map(([name, shots]) => ({
             name,
             cat: shots[0].cat,
@@ -2085,7 +2095,7 @@ function buildClubSummary(enriched) {
             max: Math.max(...shots.map(s => s.distYds)),
             straight: shots.filter(s => Math.abs(s.deviation) < 15).length,
         }))
-        .sort((a, b) => catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat) || b.avg - a.avg);
+        .sort((a, b) => clubSortKey(a.name) - clubSortKey(b.name));
 
     const maxAvg = Math.max(...clubs.map(c => c.avg));
 
@@ -2567,7 +2577,7 @@ function buildClubAnalysis(round, sg) {
 
             return { name, shots: shots.length, avgDist, distStd, avgDev, devStd, avgSg, left, right, straight, tendency, consistency };
         })
-        .sort((a, b) => b.avgDist - a.avgDist);
+        .sort((a, b) => clubSortKey(a.name) - clubSortKey(b.name));
 
     if (!clubs.length) return '';
 
@@ -3985,7 +3995,6 @@ function collectClubShots(lightRounds, lastN) {
 
 function buildClubTrends(lightRounds) {
     const clubMap = collectClubShots(lightRounds);
-    const catOrder = { tee: 0, fairway_wood: 1, iron: 2, wedge: 3, unknown: 4 };
     const clubs = Object.entries(clubMap)
         .filter(([, v]) => v.shots.length >= 3)
         .map(([name, v]) => {
@@ -3996,7 +4005,7 @@ function buildClubTrends(lightRounds) {
             const straight = v.shots.filter(s => Math.abs(s.dev) < 15).length;
             return { name, cat: v.cat, shots: v.shots.length, avg, max, excluded: excluded.length, straightPct: Math.round(straight / v.shots.length * 100) };
         })
-        .sort((a, b) => (catOrder[a.cat] ?? 4) - (catOrder[b.cat] ?? 4) || b.avg - a.avg);
+        .sort((a, b) => clubSortKey(a.name) - clubSortKey(b.name));
 
     if (!clubs.length) {
         return `<div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('trends.club.nodata')}</div>`;
