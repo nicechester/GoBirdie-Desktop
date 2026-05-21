@@ -61,6 +61,23 @@ The ✨ Ask AI button builds a comprehensive markdown prompt from all round data
 
 ![Ask AI](images/ask-ai.png)
 
+### AI Insights (On-Device Deep Learning)
+Each round detail view includes a panel of AI-generated pattern insights powered by a small LSTM+Dense model that runs entirely on-device — no API calls, no data leaving the machine.
+
+The model outputs 15 pattern probabilities across four categories:
+
+| Category | Patterns |
+|---|---|
+| Tee shot | Driver slice risk, pull-hook risk, tempo rush |
+| Approach / Iron | Iron contact error, mid-range inconsistency, wedge distance control |
+| Short game | Bunker escape failure |
+| Putting | 3-putt risk, long putt tempo, short putt alignment |
+| Mental / Condition | Fatigue late release, mental snowball effect, par-5 overaggression, course rating stress, score anxiety collapse |
+
+Insights above the 65% threshold surface as warnings; above 80% as critical. Each insight has 👍/👎 feedback buttons — responses are stored locally in `feedback.json` and can be used to periodically fine-tune the model on real rounds.
+
+The model (`gobirdie_patterns.onnx`, ~229 KB) is bundled with the app and loaded at startup via the `tract-onnx` Rust crate. Inference runs in < 10ms on any modern desktop.
+
 ## Download
 
 Pre-built macOS and Windows binaries are available on the [Releases page](https://github.com/nicechester/GoBirdie-Desktop/releases).
@@ -107,6 +124,8 @@ GoBirdie-Desktop/
 │   │       └── garmin_mtp_windows.cpp   Windows WPD helper
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+│   ├── src/
+│   │   ├── inference.rs    On-device ONNX inference (tract-onnx)
 ├── web/                    Frontend (vanilla JS + Tailwind)
 │   ├── index.html
 │   └── js/
@@ -114,6 +133,12 @@ GoBirdie-Desktop/
 │       ├── i18n.js
 │       ├── nlg-templates.js
 │       └── nlg-engine.js
+├── data-prep/              Offline model training (developer only)
+│   ├── train.py            PyTorch LSTM+Dense training script
+│   ├── ollama_label.py     Bulk labeling via local LLM (Ollama)
+│   ├── perturb_rounds.py   Synthetic round generation
+│   ├── golden_dataset.json Gemini-validated few-shot examples
+│   └── norm_constants.json Feature normalization constants (synced to Rust)
 ├── build.sh                macOS build script
 ├── build.bat               Windows build script
 └── vite.config.js

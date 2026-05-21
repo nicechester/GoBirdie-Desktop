@@ -256,8 +256,14 @@ async function loadDetail(id) {
         <div class="text-center text-gray-400 py-12">Loading...</div>`;
 
     try {
-        const round = await getRoundDetail(id);
+        const [round, _patterns, _feedback] = await Promise.all([
+            getRoundDetail(id),
+            invoke('infer_patterns', { id }).catch(() => null),
+            invoke('get_round_feedback', { roundId: id }).catch(() => ({})),
+        ]);
         if (!round) { content.innerHTML = '<p class="text-red-500">Round not found.</p>'; return; }
+        round._patterns = _patterns;
+        round._feedback = _feedback ?? {};
         state.activeRound = round;
         renderDetailTabs();
     } catch (e) {
@@ -330,12 +336,6 @@ function renderDetailTabs() {
         });
     });
 
-    // Ask AI button
-    document.getElementById('ask-ai-btn')?.addEventListener('click', async () => {
-        const prompt = buildAiPrompt(round);
-        await navigator.clipboard.writeText(prompt);
-        toast(t('toast.copied'));
-    });
 
     // Post-render hooks
     if (state.activeTab === 'overview') {
@@ -838,26 +838,29 @@ function buildHrZones(round) {
 
 let activeMap = null;
 // Fetch lie angles from backend via Tauri command (cached per-location in Rust)
+// Samples 4 points ±10 yards in all directions to compute both lateral and longitudinal slope.
 async function fetchLieAngles(round) {
     const sc = round.scorecard;
     if (!sc?.hole_scores?.length) return {};
 
-    const OFFSET_M = 10;
+    const OFFSET_M = 9.144; // 10 yards
     const queries = [];
 
     sc.hole_scores.forEach(hs => {
         hs.shots.forEach((shot, idx) => {
             if (shot.club_category === 'putt') return;
-            const bear = bearing(shot.from, shot.to);
-            const left  = offsetPoint(shot.from, bear - 90, OFFSET_M);
-            const right = offsetPoint(shot.from, bear + 90, OFFSET_M);
-            queries.push({ key: `${hs.hole_number}-${idx}`, left, right });
+            const bear     = bearing(shot.from, shot.to);
+            const left     = offsetPoint(shot.from, bear - 90, OFFSET_M);
+            const right    = offsetPoint(shot.from, bear + 90, OFFSET_M);
+            const forward  = offsetPoint(shot.from, bear,       OFFSET_M);
+            const backward = offsetPoint(shot.from, bear + 180, OFFSET_M);
+            queries.push({ key: `${hs.hole_number}-${idx}`, shot, left, right, forward, backward });
         });
     });
 
     if (!queries.length) return {};
 
-    const allPoints = queries.flatMap(q => [q.left, q.right]);
+    const allPoints = queries.flatMap(q => [q.left, q.right, q.forward, q.backward]);
     const locations = allPoints.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`);
     const results = {};
 
@@ -865,16 +868,24 @@ async function fetchLieAngles(round) {
         const elevations = await invoke('fetch_elevations', { locations });
 
         queries.forEach((q, i) => {
-            const leftElev = elevations[i * 2];
-            const rightElev = elevations[i * 2 + 1];
-            if (leftElev != null && rightElev != null) {
-                const diff = rightElev - leftElev;
-                const angle = Math.atan2(diff, OFFSET_M * 2) * 180 / Math.PI;
+            const leftElev     = elevations[i * 4];
+            const rightElev    = elevations[i * 4 + 1];
+            const forwardElev  = elevations[i * 4 + 2];
+            const backwardElev = elevations[i * 4 + 3];
+            if (leftElev != null && rightElev != null && forwardElev != null && backwardElev != null) {
+                const lateralDiff      = rightElev - leftElev;       // positive = right is higher (sidehill)
+                const longitudinalDiff = forwardElev - backwardElev; // positive = forward is higher (uphill)
+                const totalDiff = Math.sqrt(lateralDiff ** 2 + longitudinalDiff ** 2);
+                const angle     = Math.atan2(totalDiff, OFFSET_M * 2) * 180 / Math.PI;
                 let label;
-                if (Math.abs(angle) < 1) label = 'Flat';
-                else if (angle > 0) label = `+${angle.toFixed(1)}°`;
-                else label = `${angle.toFixed(1)}°`;
+                if (angle < 1) {
+                    label = 'Flat';
+                } else {
+                    const dirDeg = Math.atan2(lateralDiff, longitudinalDiff) * 180 / Math.PI;
+                    label = `${slopeArrow(dirDeg)} ${angle.toFixed(1)}°`;
+                }
                 results[q.key] = { angle, label };
+                q.shot.lie_angle = { angle, label };
             }
         });
     } catch (e) {
@@ -882,6 +893,12 @@ async function fetchLieAngles(round) {
     }
 
     return results;
+}
+
+// 8-direction arrow for slope: 0°=uphill-forward, 90°=uphill-right, 180°=downhill, 270°=uphill-left
+function slopeArrow(deg) {
+    const norm = ((deg % 360) + 360) % 360;
+    return ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'][Math.round(norm / 45) % 8];
 }
 
 // Offset a GPS point by distance (meters) along a bearing (degrees)
@@ -1144,6 +1161,7 @@ async function fetchAndUpdateElevationGainForStats(round) {
                     const gain = Math.round(targetAlt - shotAlt);
                     const key = `${hs.hole_number}-${idx}`;
                     results[key] = gain;
+                    shot.elevation_gain = gain;
                     updateElevationGainCell(key, gain);
                 }
             });
@@ -2904,6 +2922,8 @@ function buildAnalyticsContext(round, sg, clubStats) {
         driverLeftPct: missBias.driverLeftPct ?? null,
         ironRightPct: missBias.ironRightPct ?? null,
         ironLeftPct: missBias.ironLeftPct ?? null,
+        patterns: round._patterns ?? null,
+        feedback: round._feedback ?? {},
     };
 }
 
@@ -2958,8 +2978,8 @@ function buildAiPrompt(round) {
             const distYds = def?.distance_cm ? Math.round(def.distance_cm / 91.44) : '?';
             L.push(`\n${t('ai.sc.hole')} ${hs.hole_number} (Par ${def?.par ?? '?'}, ${distYds} yds):`);
             hs.shots.forEach((shot, i) => {
-                const elevGain = cachedElevGain[`${hs.hole_number}-${i}`];
-                const lie = null;
+                const elevGain = shot.elevation_gain ?? cachedElevGain[`${hs.hole_number}-${i}`];
+                const lie = shot.lie_angle ?? null;
                 const elevStr = elevGain != null
                     ? (elevGain === 0 ? 'Flat' : `${elevGain > 0 ? '↑' : '↓'}${mToFt(Math.abs(elevGain))}ft`)
                     : null;
@@ -4204,6 +4224,32 @@ function onLangChange() {
     else if (state.activeRound) renderDetailTabs();
     updateStats();
 }
+
+document.addEventListener('click', async e => {
+    if (e.target.closest('#ask-ai-btn') && state.activeRound) {
+        const prompt = buildAiPrompt(state.activeRound);
+        await navigator.clipboard.writeText(prompt);
+        toast(t('toast.copied'));
+        return;
+    }
+
+    const btn = e.target.closest('[data-feedback]');
+    if (!btn) return;
+    const code    = btn.dataset.code;
+    const helpful = btn.dataset.feedback === 'up';
+    const roundId = state.activeRound?.id;
+    if (!roundId || !code) return;
+
+    const row = btn.closest('[data-insight-code]');
+    row?.querySelectorAll('[data-feedback]').forEach(b => {
+        b.classList.remove('text-green-500', 'text-red-400');
+        b.classList.add('text-gray-300');
+    });
+    btn.classList.remove('text-gray-300');
+    btn.classList.add(helpful ? 'text-green-500' : 'text-red-400');
+
+    invoke('save_feedback', { roundId, code, helpful }).catch(console.error);
+});
 
 async function init() {
     document.getElementById('sync-btn').addEventListener('click', handleSync);

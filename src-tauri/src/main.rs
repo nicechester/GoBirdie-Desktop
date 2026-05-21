@@ -4,6 +4,7 @@ mod models;
 mod parser;
 mod store;
 mod mtp;
+mod inference;
 #[cfg(not(target_os = "windows"))]
 mod apple_sync;
 #[cfg(not(target_os = "windows"))]
@@ -21,8 +22,10 @@ use tauri::State;
 struct AppState {
     store: Mutex<Store>,
     fit_dir: PathBuf,
+    app_data_dir: PathBuf,
     clubs: Mutex<Vec<ClubInfo>>,
     elevation_cache: Mutex<HashMap<String, Option<f64>>>,
+    onnx_model: Option<inference::OnnxModel>,
 }
 
 fn hash_file(path: &Path) -> String {
@@ -353,33 +356,130 @@ fn try_load_clubs(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+pub struct PatternVector {
+    pub driver_slice_risk: f32,
+    pub driver_pull_hook_risk: f32,
+    pub tee_shot_tempo_rush: f32,
+    pub iron_contact_error: f32,
+    pub mid_range_inconsistency: f32,
+    pub wedge_distance_control: f32,
+    pub bunker_escape_failure: f32,
+    pub putting_3putt_risk: f32,
+    pub long_putt_tempo_issue: f32,
+    pub short_putt_alignment_miss: f32,
+    pub fatigue_late_release: f32,
+    pub mental_snowball_effect: f32,
+    pub par5_overaggressive: f32,
+    pub course_rating_stress: f32,
+    pub score_anxiety_collapse: f32,
+}
+
+#[tauri::command]
+fn infer_patterns(id: String, state: State<'_, AppState>) -> Option<PatternVector> {
+    let model = state.onnx_model.as_ref()?;
+    let round = state.store.lock().unwrap().load_by_id(&id)?;
+    let features = inference::build_feature_vector(&round);
+    let probs = inference::run_inference(model, &features).ok()?;
+    Some(PatternVector {
+        driver_slice_risk:         probs[0],
+        driver_pull_hook_risk:     probs[1],
+        tee_shot_tempo_rush:       probs[2],
+        iron_contact_error:        probs[3],
+        mid_range_inconsistency:   probs[4],
+        wedge_distance_control:    probs[5],
+        bunker_escape_failure:     probs[6],
+        putting_3putt_risk:        probs[7],
+        long_putt_tempo_issue:     probs[8],
+        short_putt_alignment_miss: probs[9],
+        fatigue_late_release:      probs[10],
+        mental_snowball_effect:    probs[11],
+        par5_overaggressive:       probs[12],
+        course_rating_stress:      probs[13],
+        score_anxiety_collapse:    probs[14],
+    })
+}
+
+#[tauri::command]
+fn save_feedback(round_id: String, code: String, helpful: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.app_data_dir.join("feedback.json");
+    let mut entries: Vec<serde_json::Value> = path.exists()
+        .then(|| std::fs::read_to_string(&path).ok())
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    entries.retain(|e| !(e["round_id"] == round_id && e["code"] == code));
+    entries.push(serde_json::json!({ "round_id": round_id, "code": code, "helpful": helpful, "ts": ts }));
+    std::fs::write(&path, serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_round_feedback(round_id: String, state: State<'_, AppState>) -> serde_json::Value {
+    let path = state.app_data_dir.join("feedback.json");
+    let entries: Vec<serde_json::Value> = path.exists()
+        .then(|| std::fs::read_to_string(&path).ok())
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let map: serde_json::Map<String, serde_json::Value> = entries.into_iter()
+        .filter(|e| e["round_id"] == round_id)
+        .filter_map(|e| Some((e["code"].as_str()?.to_string(), e["helpful"].clone())))
+        .collect();
+    serde_json::Value::Object(map)
+}
+
 fn main() {
-    let app_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("go-birdie-desktop");
-    std::fs::create_dir_all(&app_dir).ok();
-
-    let db_path = app_dir.join("rounds.db");
-    let fit_dir = app_dir.join("fit-files");
-    std::fs::create_dir_all(&fit_dir).ok();
-
-    let store = Store::open(&db_path).expect("Failed to open store");
-
-    // Try to load clubs from fit_dir on startup
-    let clubs = fit_dir.join("Clubs.fit");
-    let initial_clubs = if clubs.exists() {
-        parser::parse_clubs(&clubs).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(AppState {
-            store: Mutex::new(store),
-            fit_dir,
-            clubs: Mutex::new(initial_clubs),
-            elevation_cache: Mutex::new(HashMap::new()),
+        .setup(|app| {
+            use tauri::Manager;
+
+            let app_dir = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("go-birdie-desktop");
+            std::fs::create_dir_all(&app_dir).ok();
+
+            let db_path = app_dir.join("rounds.db");
+            let fit_dir = app_dir.join("fit-files");
+            std::fs::create_dir_all(&fit_dir).ok();
+
+            let store = Store::open(&db_path).expect("Failed to open store");
+
+            // Try to load clubs from fit_dir on startup
+            let clubs = fit_dir.join("Clubs.fit");
+            let initial_clubs = if clubs.exists() {
+                parser::parse_clubs(&clubs).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            // Load ONNX model
+            let model_path = app_dir.join("gobirdie_patterns.onnx");
+            let resource_path = app.path().resource_dir()
+                .ok()
+                .map(|p| p.join("gobirdie_patterns.onnx"));
+
+            let onnx_model = model_path.exists()
+                .then(|| inference::load_model(&model_path).ok()).flatten()
+                .or_else(|| resource_path.as_deref()
+                    .filter(|p| p.exists())
+                    .and_then(|p| inference::load_model(p).ok()));
+
+            app.manage(AppState {
+                store: Mutex::new(store),
+                fit_dir,
+                app_data_dir: app_dir,
+                clubs: Mutex::new(initial_clubs),
+                elevation_cache: Mutex::new(HashMap::new()),
+                onnx_model,
+            });
+
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             sync_rounds,
@@ -398,6 +498,9 @@ fn main() {
             sync_android_rounds,
             delete_round,
             fetch_elevations,
+            infer_patterns,
+            save_feedback,
+            get_round_feedback,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

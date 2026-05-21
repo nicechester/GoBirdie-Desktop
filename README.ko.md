@@ -62,6 +62,23 @@
 
 ![AI에게 물어보기](images/ko/ask-ai.png)
 
+### AI 인사이트 (온디바이스 딥러닝)
+각 라운드 상세 화면에 온디바이스 LSTM+Dense 모델이 생성한 패턴 인사이트가 표시됩니다. 외부 API 호출 없이 기기 내에서 완전히 실행되며 데이터가 외부로 전송되지 않습니다.
+
+모델은 4개 카테고리에 걸쳐 15가지 패턴 확률을 출력합니다:
+
+| 카테고리 | 패턴 |
+|---|---|
+| 티샷 | 드라이버 슬라이스, 풀훅, 템포 급가속 |
+| 어프로치/아이언 | 아이언 컨택 오류, 중거리 불일치, 웨지 거리 컨트롤 |
+| 숏게임 | 벙커 탈출 실패 |
+| 퍼팅 | 3퍼팅 위험, 롱 퍼트 템포, 숏 퍼트 정렬 |
+| 멘탈/컨디션 | 피로 조기 릴리즈, 멘탈 스노우볼, 파5 과공격, 코스 난이도 스트레스, 스코어 불안 붕괴 |
+
+65% 이상이면 경고, 80% 이상이면 위험으로 표시됩니다. 각 인사이트에는 👍/👎 피드백 버튼이 있으며 응답은 로컬 `feedback.json`에 저장되어 모델 파인튜닝에 활용됩니다.
+
+모델(`gobirdie_patterns.onnx`, 약 229KB)은 앱에 번들로 포함되어 `tract-onnx` 러스트 크레이트로 시작 시 로드됩니다. 추론은 일반 데스크탑에서 10ms 이내에 완료됩니다.
+
 ## 다운로드
 
 사전 빌드된 macOS 및 Windows 바이너리는 [릴리스 페이지](https://github.com/nicechester/GoBirdie-Desktop/releases)에서 다운로드할 수 있습니다.
@@ -108,6 +125,8 @@ GoBirdie-Desktop/
 │   │       └── garmin_mtp_windows.cpp   Windows WPD 헬퍼
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+│   ├── src/
+│   │   ├── inference.rs    온디바이스 ONNX 추론 (tract-onnx)
 ├── web/                    프론트엔드 (바닐라 JS + Tailwind)
 │   ├── index.html
 │   └── js/
@@ -115,6 +134,12 @@ GoBirdie-Desktop/
 │       ├── i18n.js
 │       ├── nlg-templates.js
 │       └── nlg-engine.js
+├── data-prep/              오프라인 모델 학습 (개발자용)
+│   ├── train.py            PyTorch LSTM+Dense 학습 스크립트
+│   ├── ollama_label.py     로컬 LLM 대량 라벨링 (Ollama)
+│   ├── perturb_rounds.py   합성 라운드 데이터 생성
+│   ├── golden_dataset.json Gemini 검증 골든 예시
+│   └── norm_constants.json 피처 정규화 상수 (러스트와 동기화)
 ├── build.sh                macOS 빌드 스크립트
 ├── build.bat               Windows 빌드 스크립트
 └── vite.config.js
