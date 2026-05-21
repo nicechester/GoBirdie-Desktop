@@ -658,5 +658,241 @@ export const NLG_TEMPLATES = [
             ],
         }
     },
+
+    // ── Deep Learning Pattern Insights (on-device model) ─────────────────────
+    // Conditions guard on d.patterns existing before reading any field.
+
+    {
+        code: 'PATTERN_FATIGUE_LATE_RELEASE',
+        condition: d => (d.patterns?.fatigue_late_release ?? 0) > 0.65,
+        severity: d => (d.patterns?.fatigue_late_release ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 1,
+        messages: {
+            en: [
+                d => `Fatigue pattern detected (${Math.round(d.patterns.fatigue_late_release * 100)}% confidence) — late-round body fatigue is triggering early wrist release, spiking hook tendency in the back nine.`,
+                d => `The model flagged fatigue-driven release breakdown at ${Math.round(d.patterns.fatigue_late_release * 100)}%. When legs tire, the upper body takes over and the face closes too early.`,
+            ],
+            ko: [
+                d => `피로로 인한 조기 릴리즈 패턴 감지 (${Math.round(d.patterns.fatigue_late_release * 100)}% 확률) — 후반 체력 저하로 손목이 감기며 훅 경향이 급증합니다.`,
+                d => `모델이 체력 저하 릴리즈 붕괴를 ${Math.round(d.patterns.fatigue_late_release * 100)}%로 감지했습니다. 다리가 피로해지면 상체가 과도하게 개입하며 페이스가 조기 폐쇄됩니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_DRIVER_PULL_HOOK',
+        condition: d => (d.patterns?.driver_pull_hook_risk ?? 0) > 0.65,
+        severity: d => (d.patterns?.driver_pull_hook_risk ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 1,
+        messages: {
+            en: [
+                d => `Driver pull-hook risk at ${Math.round(d.patterns.driver_pull_hook_risk * 100)}% — the data suggests a consistent in-to-out path issue combined with a closing face at impact.`,
+                d => `${Math.round(d.patterns.driver_pull_hook_risk * 100)}% pull-hook probability on your driver. Check grip pressure in the left hand and resist the urge to steer the ball off the tee.`,
+            ],
+            ko: [
+                d => `드라이버 풀훅 위험도 ${Math.round(d.patterns.driver_pull_hook_risk * 100)}% — 데이터상 인-투-아웃 궤도와 임팩트 시 페이스 폐쇄가 복합적으로 나타납니다.`,
+                d => `드라이버 풀훅 확률 ${Math.round(d.patterns.driver_pull_hook_risk * 100)}%. 왼손 그립 압력을 점검하고 티샷에서 볼을 유도하려는 충동을 자제하세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_DRIVER_SLICE',
+        condition: d => (d.patterns?.driver_slice_risk ?? 0) > 0.65,
+        severity: d => (d.patterns?.driver_slice_risk ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 1,
+        messages: {
+            en: [
+                d => `Driver slice risk flagged at ${Math.round(d.patterns.driver_slice_risk * 100)}% — an open face at impact is likely costing you both distance and fairways.`,
+                d => `${Math.round(d.patterns.driver_slice_risk * 100)}% slice probability detected. Focus on starting the downswing with the lower body rather than the shoulders to square the face.`,
+            ],
+            ko: [
+                d => `드라이버 슬라이스 위험도 ${Math.round(d.patterns.driver_slice_risk * 100)}% — 임팩트 시 오픈 페이스가 거리와 페어웨이 적중률 모두를 잃게 하고 있습니다.`,
+                d => `슬라이스 확률 ${Math.round(d.patterns.driver_slice_risk * 100)}% 감지. 다운스윙을 어깨 대신 하체로 시작해 페이스를 스퀘어로 만들어 보세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_TEE_TEMPO_RUSH',
+        condition: d => (d.patterns?.tee_shot_tempo_rush ?? 0) > 0.65,
+        severity: d => (d.patterns?.tee_shot_tempo_rush ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Tee shot tempo rushing detected at ${Math.round(d.patterns.tee_shot_tempo_rush * 100)}% — the swing is accelerating too early in the downswing, robbing you of stored power and consistency.`,
+                d => `${Math.round(d.patterns.tee_shot_tempo_rush * 100)}% tempo rush signal on tee shots. Three slow practice swings before stepping in can reset your timing without changing your mechanics.`,
+            ],
+            ko: [
+                d => `티샷 템포 급가속 감지 ${Math.round(d.patterns.tee_shot_tempo_rush * 100)}% — 다운스윙이 너무 일찍 가속되어 축적된 파워와 일관성을 잃고 있습니다.`,
+                d => `티샷 템포 급가속 신호 ${Math.round(d.patterns.tee_shot_tempo_rush * 100)}%. 어드레스 전 천천히 빈스윙 3회로 타이밍을 리셋해보세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_MENTAL_SNOWBALL',
+        condition: d => (d.patterns?.mental_snowball_effect ?? 0) > 0.65,
+        severity: d => (d.patterns?.mental_snowball_effect ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 1,
+        messages: {
+            en: [
+                d => `Mental snowball effect at ${Math.round(d.patterns.mental_snowball_effect * 100)}% — a bad hole is bleeding into the next ones. Score recovery after a blow-up hole is the biggest lever you have.`,
+                d => `${Math.round(d.patterns.mental_snowball_effect * 100)}% chance of cascading errors after a bad hole. The reset routine between holes matters as much as the swing itself.`,
+            ],
+            ko: [
+                d => `멘탈 스노우볼 효과 ${Math.round(d.patterns.mental_snowball_effect * 100)}% — 나쁜 홀이 다음 홀로 이어지고 있습니다. 블로우업 홀 이후 회복이 가장 중요한 과제입니다.`,
+                d => `연속 실수 확률 ${Math.round(d.patterns.mental_snowball_effect * 100)}%. 홀과 홀 사이 리셋 루틴이 스윙만큼 중요합니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_SCORE_ANXIETY_COLLAPSE',
+        condition: d => (d.patterns?.score_anxiety_collapse ?? 0) > 0.65,
+        severity: d => (d.patterns?.score_anxiety_collapse ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 1,
+        messages: {
+            en: [
+                d => `Score anxiety collapse detected at ${Math.round(d.patterns.score_anxiety_collapse * 100)}% — performance is degrading under pressure as the scorecard awareness increases.`,
+                d => `${Math.round(d.patterns.score_anxiety_collapse * 100)}% collapse probability under score pressure. Focus on the next shot, not the total — one hole at a time is the only playbook that works.`,
+            ],
+            ko: [
+                d => `스코어 불안 붕괴 ${Math.round(d.patterns.score_anxiety_collapse * 100)}% 감지 — 스코어 의식이 높아지면서 압박 상황에서 수행력이 저하되고 있습니다.`,
+                d => `스코어 압박 붕괴 확률 ${Math.round(d.patterns.score_anxiety_collapse * 100)}%. 합계가 아닌 다음 샷에만 집중하세요 — 한 홀씩이 유일한 해법입니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_PAR5_OVERAGGRESSIVE',
+        condition: d => (d.patterns?.par5_overaggressive ?? 0) > 0.65,
+        severity: d => (d.patterns?.par5_overaggressive ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Par-5 overaggression flagged at ${Math.round(d.patterns.par5_overaggressive * 100)}% — going for the green in two when the percentages don't favour it is turning birdie holes into bogey holes.`,
+                d => `${Math.round(d.patterns.par5_overaggressive * 100)}% overaggressive par-5 signal. A comfortable layup to your favourite wedge distance beats a forced long iron into a hazard every time.`,
+            ],
+            ko: [
+                d => `파5 과공격적 플레이 ${Math.round(d.patterns.par5_overaggressive * 100)}% 감지 — 확률이 유리하지 않은 상황에서 투온을 시도해 버디홀을 보기홀로 만들고 있습니다.`,
+                d => `파5 과공격 신호 ${Math.round(d.patterns.par5_overaggressive * 100)}%. 강제적인 롱 아이언보다 편안한 레이업으로 웨지 거리를 남기는 것이 항상 유리합니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_IRON_CONTACT_ERROR',
+        condition: d => (d.patterns?.iron_contact_error ?? 0) > 0.65,
+        severity: d => (d.patterns?.iron_contact_error ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Iron contact error at ${Math.round(d.patterns.iron_contact_error * 100)}% — thin and fat strikes suggest the low point of the arc is shifting hole to hole. Ball position consistency is the fix.`,
+                d => `${Math.round(d.patterns.iron_contact_error * 100)}% iron contact error probability. Focus on keeping the lead wrist flat through impact to compress the ball cleanly.`,
+            ],
+            ko: [
+                d => `아이언 컨택 오류 ${Math.round(d.patterns.iron_contact_error * 100)}% — 씬/팻 샷은 홀마다 스윙 최저점이 흔들리고 있음을 시사합니다. 볼 위치 일관성이 핵심입니다.`,
+                d => `아이언 컨택 오류 확률 ${Math.round(d.patterns.iron_contact_error * 100)}%. 임팩트 시 앞손 손목을 평평하게 유지해 볼을 깨끗하게 압축하세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_MID_RANGE_INCONSISTENCY',
+        condition: d => (d.patterns?.mid_range_inconsistency ?? 0) > 0.65,
+        severity: d => (d.patterns?.mid_range_inconsistency ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Mid-range shot inconsistency at ${Math.round(d.patterns.mid_range_inconsistency * 100)}% — the 100–160 yard range is where your dispersion is widest. This is usually a tempo issue under pressure.`,
+                d => `${Math.round(d.patterns.mid_range_inconsistency * 100)}% mid-range inconsistency signal. Commit to one club and one shot shape rather than second-guessing yardages.`,
+            ],
+            ko: [
+                d => `중거리 샷 불일치 ${Math.round(d.patterns.mid_range_inconsistency * 100)}% — 100~160야드 구간에서 분산이 가장 큽니다. 보통 압박 상황의 템포 문제입니다.`,
+                d => `중거리 불일치 신호 ${Math.round(d.patterns.mid_range_inconsistency * 100)}%. 거리를 재고하기보다 하나의 클럽과 구질에 확신을 갖고 치세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_WEDGE_DISTANCE_CONTROL',
+        condition: d => (d.patterns?.wedge_distance_control ?? 0) > 0.65,
+        severity: d => (d.patterns?.wedge_distance_control ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Wedge distance control issue at ${Math.round(d.patterns.wedge_distance_control * 100)}% — short-range shots are ending up significantly short or long of the flag, adding unnecessary putts.`,
+                d => `${Math.round(d.patterns.wedge_distance_control * 100)}% wedge distance control flag. Use a clock system (9 o'clock, 10 o'clock backswing) to dial in consistent carry distances on the range.`,
+            ],
+            ko: [
+                d => `웨지 거리 컨트롤 문제 ${Math.round(d.patterns.wedge_distance_control * 100)}% — 단거리 샷이 핀을 크게 지나치거나 못 미쳐 불필요한 퍼팅이 늘고 있습니다.`,
+                d => `웨지 거리 컨트롤 신호 ${Math.round(d.patterns.wedge_distance_control * 100)}%. 클락 시스템(9시, 10시 백스윙)으로 캐리 거리를 레인지에서 맞춰보세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_PUTTING_3PUTT',
+        condition: d => (d.patterns?.putting_3putt_risk ?? 0) > 0.65,
+        severity: d => (d.patterns?.putting_3putt_risk ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 1,
+        messages: {
+            en: [
+                d => `3-putt risk at ${Math.round(d.patterns.putting_3putt_risk * 100)}% — lag putting is leaving the ball outside tap-in range consistently. Speed control on long putts is the priority.`,
+                d => `${Math.round(d.patterns.putting_3putt_risk * 100)}% 3-putt probability. On putts over 20 feet, focus only on distance — getting within a 3-foot circle eliminates the damage.`,
+            ],
+            ko: [
+                d => `3퍼팅 위험도 ${Math.round(d.patterns.putting_3putt_risk * 100)}% — 래그 퍼팅이 탭인 범위 밖에 머물고 있습니다. 롱 퍼트의 스피드 컨트롤이 최우선 과제입니다.`,
+                d => `3퍼팅 확률 ${Math.round(d.patterns.putting_3putt_risk * 100)}%. 20피트 이상 퍼트에서는 거리에만 집중하세요 — 3피트 원 안에 넣으면 손실을 막을 수 있습니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_LONG_PUTT_TEMPO',
+        condition: d => (d.patterns?.long_putt_tempo_issue ?? 0) > 0.65,
+        severity: d => (d.patterns?.long_putt_tempo_issue ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Long putt tempo issue at ${Math.round(d.patterns.long_putt_tempo_issue * 100)}% — an uneven stroke rhythm on long putts is causing inconsistent speed. A metronome practice drill can help reset this.`,
+            ],
+            ko: [
+                d => `롱 퍼트 템포 문제 ${Math.round(d.patterns.long_putt_tempo_issue * 100)}% — 롱 퍼트에서 리듬이 고르지 않아 스피드가 일정하지 않습니다. 메트로놈 연습으로 리셋할 수 있습니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_SHORT_PUTT_ALIGNMENT',
+        condition: d => (d.patterns?.short_putt_alignment_miss ?? 0) > 0.65,
+        severity: d => (d.patterns?.short_putt_alignment_miss ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Short putt alignment miss at ${Math.round(d.patterns.short_putt_alignment_miss * 100)}% — inside 6 feet you're losing strokes to misaligned start lines. A gate drill on the practice green is the fastest fix.`,
+            ],
+            ko: [
+                d => `숏 퍼트 정렬 실수 ${Math.round(d.patterns.short_putt_alignment_miss * 100)}% — 6피트 이내에서 스타트 라인 정렬 오류로 타수를 잃고 있습니다. 게이트 드릴이 가장 빠른 교정 방법입니다.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_BUNKER_ESCAPE',
+        condition: d => (d.patterns?.bunker_escape_failure ?? 0) > 0.65,
+        severity: d => (d.patterns?.bunker_escape_failure ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 2,
+        messages: {
+            en: [
+                d => `Bunker escape failure risk at ${Math.round(d.patterns.bunker_escape_failure * 100)}% — greenside sand is costing extra strokes. Open the face, open your stance, and commit to hitting two inches behind the ball.`,
+            ],
+            ko: [
+                d => `벙커 탈출 실패 위험도 ${Math.round(d.patterns.bunker_escape_failure * 100)}% — 그린사이드 모래에서 여분의 타수가 나오고 있습니다. 페이스와 스탠스를 열고 볼 2인치 뒤를 확신 있게 타격하세요.`,
+            ],
+        }
+    },
+    {
+        code: 'PATTERN_COURSE_RATING_STRESS',
+        condition: d => (d.patterns?.course_rating_stress ?? 0) > 0.65,
+        severity: d => (d.patterns?.course_rating_stress ?? 0) > 0.80 ? 'critical' : 'warning',
+        tier: 3,
+        messages: {
+            en: [
+                d => `Course difficulty stress at ${Math.round(d.patterns.course_rating_stress * 100)}% — the course rating is at the upper end of your comfort zone, which tends to amplify small errors into bigger ones.`,
+            ],
+            ko: [
+                d => `코스 난이도 스트레스 ${Math.round(d.patterns.course_rating_stress * 100)}% — 코스 레이팅이 컴포트 존 상단에 있어 작은 실수가 더 큰 손실로 이어지는 경향이 있습니다.`,
+            ],
+        }
+    },
 ];
 

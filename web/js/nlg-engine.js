@@ -24,7 +24,8 @@ export function generateInsights(ctx, maxInsights = 6) {
                     msgArr = tpl.messages[lang] ?? tpl.messages.en;
                 }
                 const msg = msgArr[Math.floor(Math.random() * msgArr.length)](ctx);
-                fired.push({ code: tpl.code, severity: tpl.severity, tier: tpl.tier, message: msg });
+                const severity = typeof tpl.severity === 'function' ? tpl.severity(ctx) : tpl.severity;
+                fired.push({ code: tpl.code, severity, tier: tpl.tier, message: msg });
             }
         } catch (_) { /* skip if data missing */ }
     }
@@ -50,11 +51,21 @@ export function buildInsightsCard(ctx) {
     const insights = generateInsights(ctx, 7);
     if (!insights.length) return '';
 
-    const items = insights.map(i => `
-        <div class="flex gap-3 py-3 border-b border-gray-50 last:border-0">
+    const fb = ctx.feedback ?? {};
+    const items = insights.map(i => {
+        const stored = fb[i.code];  // true | false | undefined
+        const upCls   = stored === true  ? 'text-green-500' : 'text-gray-300';
+        const downCls = stored === false ? 'text-red-400'   : 'text-gray-300';
+        return `
+        <div class="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0" data-insight-code="${i.code}">
             <span class="text-base flex-shrink-0 mt-0.5">${SEVERITY_ICON[i.severity]}</span>
-            <p class="text-sm text-gray-700 leading-relaxed">${i.message}</p>
-        </div>`).join('');
+            <p class="text-sm text-gray-700 leading-relaxed flex-1">${i.message}</p>
+            <span class="flex gap-1 flex-shrink-0 mt-0.5">
+                <button data-feedback="up"   data-code="${i.code}" class="${upCls}   hover:text-green-500 transition-colors text-sm leading-none" title="Helpful">👍</button>
+                <button data-feedback="down" data-code="${i.code}" class="${downCls} hover:text-red-400  transition-colors text-sm leading-none" title="Not helpful">👎</button>
+            </span>
+        </div>`;
+    }).join('');
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
