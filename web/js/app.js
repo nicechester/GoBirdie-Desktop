@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
+import { openCoachingModal } from './coaching-panel.js';
 import { t, getLang, setLang } from './i18n.js';
 import maplibregl from 'maplibre-gl';
 
@@ -339,7 +340,9 @@ function renderDetailTabs() {
 
     // Post-render hooks
     if (state.activeTab === 'overview') {
-        // no chart in overview anymore
+        // no chart in overview
+    } else if (state.activeTab === 'sg') {
+        // coaching panel is a modal, no inline init needed
     } else if (state.activeTab === 'shotmap') {
         requestAnimationFrame(() => renderShotMap(round));
     } else if (state.activeTab === 'stats') {
@@ -4227,9 +4230,7 @@ function onLangChange() {
 
 document.addEventListener('click', async e => {
     if (e.target.closest('#ask-ai-btn') && state.activeRound) {
-        const prompt = buildAiPrompt(state.activeRound);
-        await navigator.clipboard.writeText(prompt);
-        toast(t('toast.copied'));
+        openCoachingModal(state.activeRound.id);
         return;
     }
 

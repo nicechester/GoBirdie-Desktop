@@ -44,6 +44,12 @@ export const STRINGS = {
         'tab.stats': 'Club Performances',
         'tab.sg': 'Shot Analysis',
         'btn.askai': 'Ask AI',
+        'coaching.title': 'AI Coaching',
+        'coaching.desc': 'On-device analysis powered by your fine-tuned GoBirdie Coach model.',
+        'coaching.analyze': 'Analyze Round',
+        'coaching.analyzing': 'Analyzing your round...',
+        'coaching.copy': 'Copy',
+        'coaching.reanalyze': 'Re-analyze',
 
         // Overview cards
         'stat.minutes': 'Minutes',
@@ -318,6 +324,12 @@ export const STRINGS = {
         'tab.stats': '클럽 성적',
         'tab.sg': '샷 분석',
         'btn.askai': 'AI에게 물어보기',
+        'coaching.title': 'AI 코칭',
+        'coaching.desc': '파인튜닝된 GoBirdie Coach 모델로 기기 내 분석을 제공합니다.',
+        'coaching.analyze': '라운드 분석',
+        'coaching.analyzing': '라운드를 분석하는 중...',
+        'coaching.copy': '복사',
+        'coaching.reanalyze': '다시 분석',
 
         // Overview cards
         'stat.minutes': '분',
