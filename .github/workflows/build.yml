@@ -33,6 +33,13 @@ jobs:
       - name: Install libmtp
         run: brew install libmtp
 
+      - name: Download model weights
+        run: |
+          curl -L --fail \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -o src-tauri/resources/gobirdie-coach-4bit/model.safetensors \
+            "https://github.com/${{ github.repository }}/releases/download/${{ vars.MODEL_RELEASE_TAG }}/model.safetensors"
+
       - name: Build native MTP helper
         run: |
           TARGET=$(rustc -vV | awk '/^host:/ { print $2 }')
