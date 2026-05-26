@@ -22,3 +22,7 @@ src-tauri/src/native/.build/
 
 # Logs
 *.log
+
+# Model weights (too large for GitHub — distribute via releases)
+*.safetensors
+*.gguf
