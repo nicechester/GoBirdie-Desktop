@@ -15,6 +15,8 @@ pub struct Settings {
     pub sg_baseline: String,    // "scratch" | "5" | "10" | "15" | "20"
     #[serde(default = "default_true")]
     pub exclude_outliers: bool,
+    #[serde(default = "default_true")]
+    pub on_device_coaching: bool,
 }
 
 fn default_tee_color() -> String { "Blue".to_string() }
@@ -29,6 +31,7 @@ impl Default for Settings {
             tee_color: default_tee_color(),
             sg_baseline: default_sg_baseline(),
             exclude_outliers: true,
+            on_device_coaching: true,
         }
     }
 }

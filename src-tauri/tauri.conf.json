@@ -32,7 +32,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["resources/gobirdie_patterns.onnx"],
+    "resources": [
+      "resources/gobirdie_patterns.onnx",
+      "resources/gobirdie-coach-4bit/**/*"
+    ],
     "externalBin": [
       "src/native/garmin_mtp",
       "src/native/garmin_mtp_windows",

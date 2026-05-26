@@ -5,6 +5,8 @@ mod parser;
 mod store;
 mod mtp;
 mod inference;
+mod prompt_builder;
+mod slm;
 #[cfg(not(target_os = "windows"))]
 mod apple_sync;
 #[cfg(not(target_os = "windows"))]
@@ -17,7 +19,7 @@ use std::sync::Mutex;
 use sha2::Digest;
 use models::{GolfRound, RoundSummary, ClubInfo, Settings};
 use store::Store;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 struct AppState {
     store: Mutex<Store>,
@@ -26,6 +28,7 @@ struct AppState {
     clubs: Mutex<Vec<ClubInfo>>,
     elevation_cache: Mutex<HashMap<String, Option<f64>>>,
     onnx_model: Option<inference::OnnxModel>,
+    slm_model_path: Option<PathBuf>,
 }
 
 fn hash_file(path: &Path) -> String {
@@ -237,6 +240,12 @@ fn get_platform() -> &'static str {
     #[cfg(target_os = "linux")] { "linux" }
 }
 
+#[tauri::command]
+fn get_is_apple_silicon() -> bool {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))] { true }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))] { false }
+}
+
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
@@ -401,6 +410,27 @@ fn infer_patterns(id: String, state: State<'_, AppState>) -> Option<PatternVecto
 }
 
 #[tauri::command]
+async fn generate_coaching_report(
+    id: String,
+    lang: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let model_path = state.slm_model_path.clone()
+        .ok_or("SLM model not found. Copy gobirdie-coach-4bit into the app data directory.")?;
+
+    let round = state.store.lock().unwrap().load_by_id(&id)
+        .ok_or("Round not found")?;
+
+    let settings = state.store.lock().unwrap().load_settings()
+        .unwrap_or_default();
+
+    let prompt = prompt_builder::build_coaching_prompt(&round, &settings, &lang);
+
+    slm::stream_coaching(app, model_path, prompt, 2500).await
+}
+
+#[tauri::command]
 fn save_feedback(round_id: String, code: String, helpful: bool, state: State<'_, AppState>) -> Result<(), String> {
     let path = state.app_data_dir.join("feedback.json");
     let mut entries: Vec<serde_json::Value> = path.exists()
@@ -470,6 +500,15 @@ fn main() {
                     .filter(|p| p.exists())
                     .and_then(|p| inference::load_model(p).ok()));
 
+            // Resolve SLM model path
+            let resource_dir = app.path().resource_dir().ok();
+            let slm_model_path = slm::find_model(&app_dir, resource_dir);
+            if slm_model_path.is_some() {
+                println!("SLM model found: {:?}", slm_model_path);
+            } else {
+                println!("SLM model not found — coaching narrative unavailable");
+            }
+
             app.manage(AppState {
                 store: Mutex::new(store),
                 fit_dir,
@@ -477,6 +516,7 @@ fn main() {
                 clubs: Mutex::new(initial_clubs),
                 elevation_cache: Mutex::new(HashMap::new()),
                 onnx_model,
+                slm_model_path,
             });
 
             Ok(())
@@ -501,6 +541,8 @@ fn main() {
             infer_patterns,
             save_feedback,
             get_round_feedback,
+            generate_coaching_report,
+            get_is_apple_silicon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
