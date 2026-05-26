@@ -50,6 +50,8 @@ export const STRINGS = {
         'coaching.analyzing': 'Analyzing your round...',
         'coaching.copy': 'Copy',
         'coaching.reanalyze': 'Re-analyze',
+        'coaching.clipboard.msg': 'On-device AI is not available on this device. Your coaching prompt has been copied to clipboard — paste it into <a href="https://chatgpt.com" target="_blank" class="text-blue-600 underline">ChatGPT</a> or <a href="https://gemini.google.com" target="_blank" class="text-blue-600 underline">Gemini</a>.',
+        'coaching.clipboard.copy': 'Copy Prompt Again',
 
         // Overview cards
         'stat.minutes': 'Minutes',
@@ -248,6 +250,9 @@ export const STRINGS = {
         'settings.sg.handicap': '{v} HCP',
         'settings.outliers': 'Exclude outlier shots',
         'settings.outliers.desc': 'Filter out shanks, tops, and GPS errors from club distance stats using IQR.',
+        'settings.ondevice': 'On-device AI Coaching',
+        'settings.ondevice.desc': 'Run the GoBirdie Coach model locally on this Mac.',
+        'settings.ondevice.unavailable': 'This feature is only available on Apple Silicon (M1, M2, M3, M4). On other devices, coaching will copy a prompt to clipboard instead.',
 
         // Menu
         'menu.trends': 'Trends',
@@ -330,6 +335,8 @@ export const STRINGS = {
         'coaching.analyzing': '라운드를 분석하는 중...',
         'coaching.copy': '복사',
         'coaching.reanalyze': '다시 분석',
+        'coaching.clipboard.msg': '이 기기에서는 기기 내 AI를 사용할 수 없습니다. 코칭 프롬프트가 클립보드에 복사되었습니다 — <a href="https://chatgpt.com" target="_blank" class="text-blue-600 underline">ChatGPT</a> 또는 <a href="https://gemini.google.com" target="_blank" class="text-blue-600 underline">Gemini</a>에 붙여넣기하세요.',
+        'coaching.clipboard.copy': '프롬프트 다시 복사',
 
         // Overview cards
         'stat.minutes': '분',
@@ -528,6 +535,9 @@ export const STRINGS = {
         'settings.sg.handicap': '{v} 핸디캅',
         'settings.outliers': '이상치 샷 제외',
         'settings.outliers.desc': '상크, 탑, GPS 오류 등을 IQR 기반으로 클럽 거리 통계에서 제외합니다.',
+        'settings.ondevice': '기기 내 AI 코칭',
+        'settings.ondevice.desc': 'GoBirdie Coach 모델을 이 Mac에서 직접 실행합니다.',
+        'settings.ondevice.unavailable': '이 기능은 Apple Silicon(M1, M2, M3, M4) Mac에서만 사용할 수 있습니다. 다른 기기에서는 코칭 프롬프트를 클립보드에 복사합니다.',
 
         // Menu
         'menu.trends': '트렌드',

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getLang, t } from './i18n.js';
+import { buildAiPrompt, state } from './app.js';
 
 let _unlisten = null;
 let _streaming = false;
@@ -102,7 +103,11 @@ export function openCoachingModal(roundId) {
     });
 
     // Auto-start on open
-    document.getElementById('coaching-analyze-btn').click();
+    if (!state.isAppleSilicon || state.settings?.on_device_coaching === false) {
+        _clipboardFallback(roundId);
+    } else {
+        document.getElementById('coaching-analyze-btn').click();
+    }
 }
 
 function _closeModal() {
@@ -112,6 +117,33 @@ function _closeModal() {
 }
 
 // ── Streaming ─────────────────────────────────────────────────────────────────
+
+function _clipboardFallback(roundId) {
+    const output = document.getElementById('coaching-output');
+    const textEl = document.getElementById('coaching-text');
+    const status = document.getElementById('coaching-status');
+    const btn    = document.getElementById('coaching-analyze-btn');
+    const btnLabel = document.getElementById('coaching-btn-label');
+    const btnIcon  = document.getElementById('coaching-btn-icon');
+
+    // Build the prompt from the active round
+    invoke('get_round_detail', { id: roundId }).then(round => {
+        if (!round) return;
+        const prompt = buildAiPrompt(round);
+        navigator.clipboard.writeText(prompt);
+        status.classList.add('hidden');
+        textEl.innerHTML = `<p class="text-gray-600 text-sm">${t('coaching.clipboard.msg')}</p>`;
+        output.classList.remove('hidden');
+        btnIcon.textContent = '📋';
+        btnLabel.textContent = t('coaching.clipboard.copy');
+        btn.disabled = false;
+        btn.onclick = () => {
+            navigator.clipboard.writeText(prompt);
+            btnLabel.textContent = '✓ Copied';
+            setTimeout(() => { btnLabel.textContent = t('coaching.clipboard.copy'); }, 2000);
+        };
+    });
+}
 
 async function _startStreaming(roundId, lang) {
     _streaming = true;
@@ -219,19 +251,60 @@ function _onStreamDone(btn, btnLabel, btnIcon, status) {
 // ── Markdown renderer ─────────────────────────────────────────────────────────
 
 function _renderMarkdown(md) {
-    // Detect and truncate repetition loops
+    // Strip everything before the first ## header (leaked preamble lines)
+    const firstHeader = md.indexOf('\n## ');
+    if (firstHeader > 0) {
+        md = md.slice(firstHeader + 1);
+    } else if (md.startsWith('## ') === false && md.indexOf('## ') > 0) {
+        md = md.slice(md.indexOf('## '));
+    }
+    md = md.trim();
+
+    // Detect repetition loop — cut at first duplicate ## section header
     const lines = md.trim().split('\n');
+    const seenHeaders = new Set();
     const seen = new Map();
-    const deduped = [];
-    for (const line of lines) {
-        const key = line.trim();
-        if (!key) { deduped.push(line); seen.clear(); continue; }
+    let cutAt = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+        const key = lines[i].trim();
+        if (!key) { seen.clear(); continue; }
+        // Duplicate ## header = model looping on sections
+        if (key.startsWith('## ')) {
+            if (seenHeaders.has(key)) { cutAt = i; break; }
+            seenHeaders.add(key);
+        }
         const count = (seen.get(key) ?? 0) + 1;
         seen.set(key, count);
-        if (count > 2) break;  // stop at third repetition of same line
-        deduped.push(line);
+        if (count >= 2) {
+            for (let j = i - 1; j >= 0; j--) {
+                if (lines[j].startsWith('## ')) { cutAt = j; break; }
+            }
+            break;
+        }
     }
-    md = deduped.join('\n');
+    // Detect sentence-level repetition in the last paragraph
+    const sentences = md.split(/(?<=[.!?])\s+/);
+    const seenSentences = new Map();
+    let sentenceCutAt = sentences.length;
+    for (let i = 0; i < sentences.length; i++) {
+        const s = sentences[i].trim();
+        if (s.length < 20) continue;
+        const count = (seenSentences.get(s) ?? 0) + 1;
+        seenSentences.set(s, count);
+        if (count >= 2) { sentenceCutAt = i; break; }
+    }
+    if (sentenceCutAt < sentences.length) {
+        md = sentences.slice(0, sentenceCutAt).join(' ').trim();
+    }
+    while (cutAt > 0) {
+        const last = lines[cutAt - 1].trim();
+        if (!last) { cutAt--; continue; }
+        // Keep if line ends cleanly
+        if (/[.!?]$/.test(last) || last.endsWith('**') || last.startsWith('#') || last.startsWith('-') || last.startsWith('*')) break;
+        // Drop incomplete lines
+        cutAt--;
+    }
+    md = lines.slice(0, cutAt).join('\n').trim();
 
     return md
         .trim()

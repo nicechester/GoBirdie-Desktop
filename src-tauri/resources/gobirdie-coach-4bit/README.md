@@ -1,7 +1,7 @@
 ---
 language: en
-library_name: mlx
 pipeline_tag: text-generation
+library_name: mlx
 tags:
 - mlx
 ---

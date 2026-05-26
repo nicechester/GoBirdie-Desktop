@@ -60,9 +60,10 @@ pub async fn stream_coaching(
         .args([
             "-u", "-c",
             &format!(
-                "import mlx_lm; \
+                "import mlx_lm; from mlx_lm.generate import make_sampler; \
                  model, tokenizer = mlx_lm.load({:?}); \
-                 [print(r.text, end='', flush=True) for r in mlx_lm.stream_generate(model, tokenizer, prompt={:?}, max_tokens={})]",
+                 sampler = make_sampler(0.7); \
+                 [print(r.text, end='', flush=True) for r in mlx_lm.stream_generate(model, tokenizer, prompt={:?}, max_tokens={}, sampler=sampler)]",
                 model_path.to_str().unwrap_or(""),
                 prompt,
                 max_tokens
@@ -70,12 +71,13 @@ pub async fn stream_coaching(
         ])
         .env("PYTHONUNBUFFERED", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to spawn mlx_lm: {}", e))?;
 
     let mut stdout = child.stdout.take()
         .ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take();
 
     // Buffer handles multi-byte UTF-8 characters (Korean = 3 bytes each)
     // We accumulate bytes until we have valid UTF-8 before emitting
@@ -116,6 +118,15 @@ pub async fn stream_coaching(
     }
 
     child.wait().await.map_err(|e| e.to_string())?;
+
+    // Log any stderr output for debugging
+    if let Some(mut err) = stderr {
+        let mut err_out = String::new();
+        tokio::io::AsyncReadExt::read_to_string(&mut err, &mut err_out).await.ok();
+        if !err_out.trim().is_empty() {
+            eprintln!("[slm stderr] {}", err_out.trim());
+        }
+    }
 
     // Signal completion
     app.emit("coaching_token", CoachingToken {

@@ -17,6 +17,7 @@ const state = {
     activeRound: null,
     settings: null,         // { player_name, device_source }
     platform: 'unknown',    // "macos" | "windows" | "linux"
+    isAppleSilicon: false,
 };
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -59,6 +60,10 @@ async function syncAndroidRounds() {
 
 async function getPlatform() {
     return invoke('get_platform');
+}
+
+async function getIsAppleSilicon() {
+    return invoke('get_is_apple_silicon');
 }
 
 async function deleteRound(id) {
@@ -3198,6 +3203,7 @@ function renderSetupModal(isFirstRun) {
     const lang = getLang();
     const sgBaseline = state.settings?.sg_baseline ?? '10';
     const excludeOutliers = state.settings?.exclude_outliers ?? true;
+    const onDeviceCoaching = state.isAppleSilicon ? (state.settings?.on_device_coaching ?? true) : false;
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3273,6 +3279,16 @@ function renderSetupModal(isFirstRun) {
                 </label>
                 <p class="text-xs text-gray-400 mt-1 ml-6">${t('settings.outliers.desc')}</p>
             </div>` : ''}
+            ${!isFirstRun ? `
+            <div>
+                <label class="flex items-center gap-2 ${state.isAppleSilicon ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}" ${state.isAppleSilicon ? '' : `title="${t('settings.ondevice.unavailable')}"`}>
+                    <input type="checkbox" id="setup-ondevice" ${onDeviceCoaching ? 'checked' : ''}
+                        ${state.isAppleSilicon ? '' : 'disabled'}
+                        class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm font-medium text-gray-700">${t('settings.ondevice')}</span>
+                </label>
+                <p class="text-xs text-gray-400 mt-1 ml-6">${state.isAppleSilicon ? t('settings.ondevice.desc') : t('settings.ondevice.unavailable')}</p>
+            </div>` : ''}
             <div id="setup-error" class="text-red-500 text-xs text-center hidden">${t('setup.validation')}</div>
             <button id="setup-save-btn"
                 class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
@@ -3326,7 +3342,8 @@ function renderSetupModal(isFirstRun) {
             return;
         }
         const outliers = modal.querySelector('#setup-outliers')?.checked ?? true;
-        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline, exclude_outliers: outliers };
+        const onDevice = state.isAppleSilicon ? (modal.querySelector('#setup-ondevice')?.checked ?? true) : false;
+        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline, exclude_outliers: outliers, on_device_coaching: onDevice };
         try {
             await saveSettings(settings);
             state.settings = settings;
@@ -4267,6 +4284,7 @@ async function init() {
     // Check first-run: load settings
     try {
         state.platform = await getPlatform().catch(() => 'unknown');
+        state.isAppleSilicon = await getIsAppleSilicon().catch(() => false);
         const settings = await getSettings();
         if (!settings || !settings.device_source) {
             // First run — show setup modal, don't load data yet
@@ -4301,6 +4319,8 @@ function applyStaticTranslations() {
     document.getElementById('menu-trends-label').textContent = t('menu.trends');
     document.getElementById('menu-settings-label').textContent = t('menu.settings');
 }
+
+export { state, buildAiPrompt };
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

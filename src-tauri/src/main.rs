@@ -240,6 +240,12 @@ fn get_platform() -> &'static str {
     #[cfg(target_os = "linux")] { "linux" }
 }
 
+#[tauri::command]
+fn get_is_apple_silicon() -> bool {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))] { true }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))] { false }
+}
+
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
@@ -421,7 +427,7 @@ async fn generate_coaching_report(
 
     let prompt = prompt_builder::build_coaching_prompt(&round, &settings, &lang);
 
-    slm::stream_coaching(app, model_path, prompt, 2000).await
+    slm::stream_coaching(app, model_path, prompt, 2500).await
 }
 
 #[tauri::command]
@@ -536,6 +542,7 @@ fn main() {
             save_feedback,
             get_round_feedback,
             generate_coaching_report,
+            get_is_apple_silicon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
