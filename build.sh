@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export MACOSX_DEPLOYMENT_TARGET=11.0
+export CMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
 NATIVE_SRC="src-tauri/src/native/garmin_mtp.c"
 NATIVE_BIN="src-tauri/src/native/garmin_mtp"
 BREW_PREFIX="$(brew --prefix)"
