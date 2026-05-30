@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
 
     steps:
       - name: Checkout repository
@@ -56,7 +58,6 @@ jobs:
         run: npm run tauri:build
         env:
           CI: false
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
