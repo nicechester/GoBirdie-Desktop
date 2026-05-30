@@ -30,15 +30,16 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Install libmtp
-        run: brew install libmtp
+      - name: Install system dependencies
+        run: brew install libmtp cmake
 
-      - name: Download model weights
+      - name: Download GGUF model
         run: |
+          mkdir -p src-tauri/resources
           curl -L --fail \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -o src-tauri/resources/gobirdie-coach-4bit/model.safetensors \
-            "https://github.com/${{ github.repository }}/releases/download/${{ vars.MODEL_RELEASE_TAG }}/model.safetensors"
+            -o src-tauri/resources/gobirdie-bllossom-Q4_K_M.gguf \
+            "https://github.com/${{ github.repository }}/releases/download/${{ vars.MODEL_RELEASE_TAG }}/gobirdie-bllossom-Q4_K_M.gguf"
 
       - name: Build native MTP helper
         run: |

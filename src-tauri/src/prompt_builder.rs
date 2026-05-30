@@ -1,8 +1,15 @@
+use serde_json::json;
 use crate::models::{GolfRound, Settings};
+use crate::SgData;
 
-/// Assembles the user-facing coaching prompt from a GolfRound.
-/// Mirrors the Python round_to_prompt_context() logic exactly.
-pub fn build_coaching_prompt(round: &GolfRound, settings: &Settings, lang: &str) -> String {
+/// Build coaching prompt with full JSON (scorecard + shots + SG + health timeline).
+pub fn build_coaching_prompt(
+    round: &GolfRound,
+    settings: &Settings,
+    lang: &str,
+    notes: Option<&str>,
+    sg_data: Option<&SgData>,
+) -> String {
     let sc = match &round.scorecard {
         Some(s) => s,
         None => return String::from("No scorecard data available."),
@@ -21,87 +28,201 @@ pub fn build_coaching_prompt(round: &GolfRound, settings: &Settings, lang: &str)
         .iter()
         .map(|h| par_map.get(&h.hole_number).copied().unwrap_or(4))
         .sum();
-    let over_par = sc.total_score as i16 - total_par as i16;
-    let over_par_str = if over_par >= 0 {
-        format!("+{}", over_par)
-    } else {
-        over_par.to_string()
-    };
 
-    let body_battery = round.health_timeline
+    // Body battery
+    let bb_samples: Vec<u8> = round.health_timeline
         .iter()
-        .find_map(|s| s.body_battery)
-        .unwrap_or(50);
+        .filter_map(|s| s.body_battery)
+        .collect();
+    let bb_start = bb_samples.first().copied().unwrap_or(50);
+    let bb_end = bb_samples.last().copied().unwrap_or(bb_start);
+
+    // Stress
+    let stress_samples: Vec<u8> = round.health_timeline
+        .iter()
+        .filter_map(|s| s.stress_proxy)
+        .filter(|&s| s > 0)
+        .collect();
+    let stress_avg = if stress_samples.is_empty() { 0 }
+        else { stress_samples.iter().map(|&s| s as u32).sum::<u32>() / stress_samples.len() as u32 };
+    let stress_peak = stress_samples.iter().copied().max().unwrap_or(0);
 
     let dt = round.start_datetime();
     let date_str = dt.format("%Y-%m-%d").to_string();
 
-    let mut lines: Vec<String> = Vec::new();
+    // Compute aggregates
+    let total_putts: u16 = sorted_holes.iter().map(|h| h.putts as u16).sum();
+    let fw_hit: u8 = sorted_holes.iter().filter(|h| {
+        let par = par_map.get(&h.hole_number).copied().unwrap_or(4);
+        par != 3 && h.fairway_hit
+    }).count() as u8;
+    let gir_count: u8 = sorted_holes.iter().filter(|h| {
+        let par = par_map.get(&h.hole_number).copied().unwrap_or(4);
+        let stg = h.score as i8 - h.putts as i8;
+        stg <= (par as i8 - 2)
+    }).count() as u8;
 
-    lines.push("## Round Summary".into());
-    lines.push(format!("Date: {}", date_str));
-    lines.push(format!(
-        "Course: {} (Slope {}, Rating {:.1})",
-        sc.course_name, sc.slope, sc.course_rating
-    ));
-    lines.push(format!(
-        "Score: {} ({}) over par {}",
-        sc.total_score, over_par_str, total_par
-    ));
-    lines.push(format!(
-        "Holes: {}, Duration: {} min",
-        sorted_holes.len(),
-        (round.duration_seconds / 60.0) as u32
-    ));
+    // Build scorecard with shots
+    let sg_shots = sg_data.map(|sg| &sg.shots);
 
-    if let Some(hr) = round.avg_heart_rate {
-        lines.push(format!("Avg HR: {} bpm", hr));
-    }
-    lines.push(format!("Body Battery start: {}%", body_battery));
-    if let Some(tempo) = round.avg_swing_tempo {
-        lines.push(format!("Avg swing tempo: {:.1}:1", tempo));
-    }
-
-    lines.push(String::new());
-    lines.push("## Player Profile".into());
-    lines.push(format!("Handicap: {}", settings.sg_baseline));
-    lines.push("Dominant hand: left-handed".into());
-
-    lines.push(String::new());
-    lines.push("## Hole-by-Hole Scorecard".into());
-    lines.push("Hole | Par | Score | +/- | Putts | FW | GIR".into());
-    lines.push("-----|-----|-------|-----|-------|----|----".into());
-
-    for hole in &sorted_holes {
+    let scorecard: Vec<serde_json::Value> = sorted_holes.iter().map(|hole| {
         let par = par_map.get(&hole.hole_number).copied().unwrap_or(4);
-        let diff = hole.score as i16 - par as i16;
-        let diff_str = if diff >= 0 { format!("+{}", diff) } else { diff.to_string() };
-        let fw = if par == 3 { "n/a" } else if hole.fairway_hit { "Y" } else { "N" };
-        // GIR: strokes to green <= par - 2
-        let strokes_to_green = hole.score - hole.putts;
-        let gir = if strokes_to_green <= (par as i8 - 2) { "Y" } else { "N" };
-        lines.push(format!(
-            "H{} | {} | {} | {} | {} | {} | {}",
-            hole.hole_number, par, hole.score, diff_str, hole.putts, fw, gir
-        ));
+        let stg = hole.score as i8 - hole.putts as i8;
+        let gir = stg <= (par as i8 - 2);
+
+        // Build shots array
+        let shots: Vec<serde_json::Value> = hole.shots.iter().enumerate().map(|(idx, shot)| {
+            let mut s = json!({
+                "club": shot.club_name.as_deref().unwrap_or("Unknown"),
+                "dist": shot.distance_meters.map(|d| (d * 1.09361) as u16).unwrap_or(0),
+            });
+            if let Some(hr) = shot.heart_rate {
+                s["hr"] = json!(hr);
+            }
+            if let Some(alt) = shot.altitude_meters {
+                s["alt"] = json!((alt * 3.28084) as u16);
+            }
+            if let Some(tempo) = shot.swing_tempo {
+                s["tempo"] = json!(format!("{:.1}:1", tempo));
+            }
+            // Add SG for this shot
+            if let Some(sg_list) = sg_shots {
+                let mut shot_idx = 0;
+                for sg_shot in sg_list.iter() {
+                    if sg_shot.hole == hole.hole_number {
+                        if shot_idx == idx {
+                            s["sg"] = json!(sg_shot.sg);
+                            break;
+                        }
+                        shot_idx += 1;
+                    }
+                }
+            }
+            s
+        }).collect();
+
+        let mut entry = json!({
+            "hole": hole.hole_number,
+            "par": par,
+            "score": hole.score,
+            "putts": hole.putts,
+            "gir": gir,
+            "shots": shots,
+        });
+        if par != 3 {
+            entry["fairway"] = json!(hole.fairway_hit);
+        }
+        entry
+    }).collect();
+
+    // Build health timeline (sampled ~5min intervals with tempo)
+    let garmin_epoch: i64 = 631065600;
+    let health_timeline: Vec<serde_json::Value> = {
+        let timeline = &round.health_timeline;
+        if timeline.is_empty() {
+            vec![]
+        } else {
+            let total_secs = timeline.last().unwrap().timestamp - timeline.first().unwrap().timestamp;
+            let avg_interval = if timeline.len() > 1 { total_secs as f64 / timeline.len() as f64 } else { 60.0 };
+            let step = ((300.0 / avg_interval) as usize).max(1); // ~5min intervals
+
+            // Also include tempo samples
+            let tempo_ts: std::collections::HashSet<i64> = round.tempo_timeline
+                .iter()
+                .map(|t| t.timestamp)
+                .collect();
+
+            timeline.iter().enumerate().filter_map(|(i, s)| {
+                let has_tempo = tempo_ts.contains(&s.timestamp);
+                if i % step != 0 && !has_tempo {
+                    return None;
+                }
+                let ts = s.timestamp + garmin_epoch;
+                let dt = chrono::DateTime::from_timestamp(ts, 0)?;
+                let time_str = dt.format("%H:%M").to_string();
+
+                let mut entry = json!({"t": time_str});
+                if let Some(hr) = s.heart_rate {
+                    entry["hr"] = json!(hr);
+                }
+                if let Some(stress) = s.stress_proxy {
+                    if stress > 0 { entry["stress"] = json!(stress); }
+                }
+                // Find matching tempo
+                if let Some(tempo) = round.tempo_timeline.iter().find(|t| {
+                    (t.timestamp - s.timestamp).abs() <= 30
+                }) {
+                    entry["tempo"] = json!(format!("{:.1}:1", tempo.ratio));
+                }
+                Some(entry)
+            }).collect()
+        }
+    };
+
+    // Build full JSON
+    let mut data = json!({
+        "date": date_str,
+        "course": sc.course_name,
+        "slope": sc.slope,
+        "rating": sc.course_rating,
+        "score": sc.total_score,
+        "par": total_par,
+        "holes": sorted_holes.len(),
+        "duration_min": (round.duration_seconds / 60.0) as u32,
+        "handicap": settings.sg_baseline,
+        "hand": "left-handed",
+        "avg_hr": round.avg_heart_rate.unwrap_or(0),
+        "max_hr": round.max_heart_rate.unwrap_or(0),
+        "body_battery": {"start": bb_start, "end": bb_end},
+        "stress": {"avg": stress_avg, "peak": stress_peak},
+        "total_putts": total_putts,
+        "fairways_hit": fw_hit,
+        "gir_count": gir_count,
+        "scorecard": scorecard,
+    });
+
+    if let Some(tempo) = round.avg_swing_tempo {
+        data["avg_tempo"] = json!(format!("{:.1}:1", tempo));
     }
-    lines.push(format!(
-        "Total | {} | {} | {} | {} | | ",
-        total_par, sc.total_score, over_par_str, sc.total_putts
-    ));
 
-    let context = lines.join("\n");
+    // Add SG summary
+    if let Some(sg) = sg_data {
+        data["sg"] = json!({
+            "total": sg.total,
+            "tee": sg.tee,
+            "approach": sg.approach,
+            "short_game": sg.short_game,
+            "putting": sg.putting,
+        });
+    }
 
-    // Wrap in the user prompt for the selected language
-    if lang == "ko" {
-        format!(
-            "나의 골프 라운드를 종합적으로 분석하고 성과, 패턴, 개선 방향에 대한 인사이트를 제공해줘.\n\n{}\n\n다음을 한국어로 제공해줘: 1) 전체 성과 요약, 2) 잘한 점, 3) 개선이 필요한 부분, 4) 패턴 (템포, 심박수, 스트레스 vs 스코어), 5) 구체적인 권고사항.\n글자 수 안내나 분량 지시는 절대 출력하지 마라.\n응답은 바로 분석 내용으로 시작하라. 안내문이나 서론 문장을 절대 쓰지 마라.",
-            context
-        )
+    // Add health timeline
+    if !health_timeline.is_empty() {
+        data["health_timeline"] = json!(health_timeline);
+    }
+
+    if let Some(n) = notes {
+        if !n.trim().is_empty() {
+            data["notes"] = json!(n.trim());
+        }
+    }
+
+    let compact = serde_json::to_string(&data).unwrap_or_default();
+
+    let instruction = if lang == "ko" {
+        "골프 코치로서 라운드 데이터를 분석하라. 한국어로: 1) 전체 요약, 2) 강점, 3) 개선점, 4) 패턴(템포/심박수/스트레스 vs 스코어), 5) 권고(최대3개). 데이터에 없는 사실은 만들지 마라."
     } else {
-        format!(
-            "Please analyze my golf round comprehensively and provide insights on performance, patterns, and areas for improvement.\n\n{}\n\nPlease provide: 1) Overall performance summary, 2) Strengths, 3) Areas for improvement, 4) Patterns (tempo, HR, stress vs score), 5) Specific recommendations.",
-            context
-        )
-    }
+        "You are a golf coach. Analyze the round data. Provide: 1) Summary, 2) Strengths, 3) Weaknesses, 4) Patterns (tempo/HR/stress vs score), 5) Recommendations (max 3). Do not invent facts."
+    };
+
+    // Verification line
+    let verification = format!(
+        "데이터 확인: 총타수={}, 총퍼트={}, 페어웨이={}. 이 숫자만 사용해라.",
+        sc.total_score, total_putts, fw_hit
+    );
+
+    format!(
+        "<|start_header_id|>system<|end_header_id|>\n{}<|eot_id|><|start_header_id|>user<|end_header_id|>\n{}\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
+        instruction, compact, verification
+    )
 }

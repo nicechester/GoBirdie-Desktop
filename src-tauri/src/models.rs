@@ -21,7 +21,7 @@ pub struct Settings {
 
 fn default_tee_color() -> String { "Blue".to_string() }
 fn default_sg_baseline() -> String { "10".to_string() }
-fn default_true() -> bool { true }
+fn default_true() -> bool { false }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -31,7 +31,7 @@ impl Default for Settings {
             tee_color: default_tee_color(),
             sg_baseline: default_sg_baseline(),
             exclude_outliers: true,
-            on_device_coaching: true,
+            on_device_coaching: false,
         }
     }
 }

@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "description": "GoBirdie golf round analysis schema. Keys are abbreviated for token efficiency.",
+  "schema": {
+    "round": {
+      "d": "date (YYYY-MM-DD)",
+      "c": "course name",
+      "sl": "slope",
+      "rt": "rating",
+      "s": "total score",
+      "p": "par",
+      "h": "holes played",
+      "dur": "duration in minutes"
+    },
+    "player": {
+      "hc": "handicap",
+      "hand": "L=left, R=right"
+    },
+    "stats": {
+      "pt": "total putts",
+      "fw": "fairways hit count",
+      "gir": "greens in regulation count",
+      "hr": "avg heart rate bpm",
+      "bb": "body battery start %",
+      "tp": "avg swing tempo ratio"
+    },
+    "scorecard": {
+      "format": "[hole, par, score, putts, fw, gir]",
+      "fw_values": "1=hit, 0=miss, -1=n/a (par3)",
+      "gir_values": "1=hit, 0=miss"
+    }
+  },
+  "system_prompt": "You are a professional golf coach. Analyze the round data using the schema above. Provide in Korean: 1) 강점 1개, 2) 개선점 2개, 3) 구체적 권고 1개. Be concise. Use only data provided."
+}

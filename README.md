@@ -57,9 +57,25 @@ Strokes Gained analysis based on Mark Broadie's *Every Shot Counts* methodology 
 Swing tempo is captured from mesg #104 in the activity FIT file as a 5-minute rolling average. The ratio (backswing:downswing) is displayed in the round header, on the timeline chart as green dots, and in individual shot popups when available.
 
 ### Ask AI
-The ✨ Ask AI button builds a comprehensive markdown prompt from all round data — scorecard, shot details, strokes gained, club analysis, shot dispersion patterns, swing tempo, and a full 1-minute health timeline — and copies it to the clipboard ready to paste into [Gemini](https://gemini.google.com) or [ChatGPT](https://chatgpt.com).
+The ✨ Ask AI button opens a coaching panel powered by a fine-tuned 3B language model ([BLLOSSOM](https://huggingface.co/Bllossom/llama-3.2-Korean-Bllossom-3B)) that runs entirely on-device via [mlx-lm](https://github.com/ml-explore/mlx-lm). No API calls, no data leaving your machine.
 
-![Ask AI](images/ask-ai.png)
+**Prerequisites for on-device AI coaching (Apple Silicon Mac only):**
+```bash
+# Python 3.10+ required (pyenv recommended)
+brew install pyenv
+pyenv install 3.11
+pyenv global 3.11
+
+# Install mlx-lm
+pip install mlx-lm
+```
+Then download the model and place it in the app data directory:
+```
+~/Library/Application Support/go-birdie-desktop/gobirdie-bllossom-4bit/
+```
+Once installed, enable **On-Device Coaching** in Settings. Without the model, the Ask AI button falls back to clipboard mode — it copies a prompt you can paste into [Gemini](https://gemini.google.com) or [ChatGPT](https://chatgpt.com).
+
+> **Note:** On-device coaching is disabled by default. Enable it in Settings after installing the model and mlx-lm.
 
 ### AI Insights (On-Device Deep Learning)
 Each round detail view includes a panel of AI-generated pattern insights powered by a small LSTM+Dense model that runs entirely on-device — no API calls, no data leaving the machine.

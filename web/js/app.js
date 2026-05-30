@@ -4320,7 +4320,7 @@ function applyStaticTranslations() {
     document.getElementById('menu-settings-label').textContent = t('menu.settings');
 }
 
-export { state, buildAiPrompt };
+export { state, buildAiPrompt, computeStrokesGained };
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

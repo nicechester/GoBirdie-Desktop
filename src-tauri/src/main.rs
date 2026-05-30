@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use sha2::Digest;
+use serde::{Serialize, Deserialize};
 use models::{GolfRound, RoundSummary, ClubInfo, Settings};
 use store::Store;
 use tauri::{AppHandle, State};
@@ -409,10 +410,30 @@ fn infer_patterns(id: String, state: State<'_, AppState>) -> Option<PatternVecto
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SgShotData {
+    pub hole: u8,
+    pub club: String,
+    pub dist: u16,
+    pub sg: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SgData {
+    pub total: f32,
+    pub tee: f32,
+    pub approach: f32,
+    pub short_game: f32,
+    pub putting: f32,
+    pub shots: Vec<SgShotData>,
+}
+
 #[tauri::command]
 async fn generate_coaching_report(
     id: String,
     lang: String,
+    notes: Option<String>,
+    sg_data: Option<SgData>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -425,7 +446,7 @@ async fn generate_coaching_report(
     let settings = state.store.lock().unwrap().load_settings()
         .unwrap_or_default();
 
-    let prompt = prompt_builder::build_coaching_prompt(&round, &settings, &lang);
+    let prompt = prompt_builder::build_coaching_prompt(&round, &settings, &lang, notes.as_deref(), sg_data.as_ref());
 
     slm::stream_coaching(app, model_path, prompt, 2500).await
 }
@@ -490,9 +511,9 @@ fn main() {
 
             // Load ONNX model
             let model_path = app_dir.join("gobirdie_patterns.onnx");
-            let resource_path = app.path().resource_dir()
-                .ok()
-                .map(|p| p.join("gobirdie_patterns.onnx"));
+            let resource_dir = app.path().resource_dir().ok();
+            let resource_path = resource_dir.as_ref()
+                .map(|p| p.join("resources").join("gobirdie_patterns.onnx"));
 
             let onnx_model = model_path.exists()
                 .then(|| inference::load_model(&model_path).ok()).flatten()
@@ -501,13 +522,13 @@ fn main() {
                     .and_then(|p| inference::load_model(p).ok()));
 
             // Resolve SLM model path
-            let resource_dir = app.path().resource_dir().ok();
-            let slm_model_path = slm::find_model(&app_dir, resource_dir);
+            let slm_model_path = slm::find_model(&app_dir, resource_dir.clone());
             if slm_model_path.is_some() {
                 println!("SLM model found: {:?}", slm_model_path);
             } else {
                 println!("SLM model not found — coaching narrative unavailable");
             }
+
 
             app.manage(AppState {
                 store: Mutex::new(store),

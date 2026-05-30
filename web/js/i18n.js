@@ -50,6 +50,7 @@ export const STRINGS = {
         'coaching.analyzing': 'Analyzing your round...',
         'coaching.copy': 'Copy',
         'coaching.reanalyze': 'Re-analyze',
+        'coaching.notes.placeholder': 'Add round notes: conditions, how you felt, equipment changes...',
         'coaching.clipboard.msg': 'On-device AI is not available on this device. Your coaching prompt has been copied to clipboard — paste it into <a href="https://chatgpt.com" target="_blank" class="text-blue-600 underline">ChatGPT</a> or <a href="https://gemini.google.com" target="_blank" class="text-blue-600 underline">Gemini</a>.',
         'coaching.clipboard.copy': 'Copy Prompt Again',
 
@@ -335,6 +336,7 @@ export const STRINGS = {
         'coaching.analyzing': '라운드를 분석하는 중...',
         'coaching.copy': '복사',
         'coaching.reanalyze': '다시 분석',
+        'coaching.notes.placeholder': '라운드 메모: 날씨, 컨디션, 장비 변경 등...',
         'coaching.clipboard.msg': '이 기기에서는 기기 내 AI를 사용할 수 없습니다. 코칭 프롬프트가 클립보드에 복사되었습니다 — <a href="https://chatgpt.com" target="_blank" class="text-blue-600 underline">ChatGPT</a> 또는 <a href="https://gemini.google.com" target="_blank" class="text-blue-600 underline">Gemini</a>에 붙여넣기하세요.',
         'coaching.clipboard.copy': '프롬프트 다시 복사',
 

@@ -17,4 +17,4 @@ rm -f "src-tauri/src/native/garmin_mtp-${TARGET_TRIPLE}"
 rm -f "src-tauri/src/native/gobirdie-sync-helper-${TARGET_TRIPLE}"
 echo "  removed native binaries"
 
-echo "Done."
+echo "Done. Run 'npm install' before dev.sh if node_modules was removed."

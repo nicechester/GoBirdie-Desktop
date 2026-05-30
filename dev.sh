@@ -22,8 +22,25 @@ trap cleanup EXIT
 # Kill anything holding port 9002
 lsof -ti:9002 | xargs kill -9 2>/dev/null || true
 
-# Build Swift sync helper if needed
 TARGET_TRIPLE="$(rustc -vV | awk '/^host:/ { print $2 }')"
+BREW_PREFIX="$(brew --prefix)"
+
+# Build garmin_mtp native helper if needed
+MTP_SRC="src-tauri/src/native/garmin_mtp.c"
+MTP_BIN="src-tauri/src/native/garmin_mtp-${TARGET_TRIPLE}"
+if [ ! -f "${MTP_BIN}" ] || [ "${MTP_SRC}" -nt "${MTP_BIN}" ]; then
+    echo "Building garmin_mtp..."
+    clang -I"${BREW_PREFIX}/include" -L"${BREW_PREFIX}/lib" -lmtp -o "${MTP_BIN}" "${MTP_SRC}"
+    echo "    ${MTP_BIN} built"
+else
+    echo "garmin_mtp up to date"
+fi
+
+# Create Windows placeholder if missing
+WIN_PLACEHOLDER="src-tauri/src/native/garmin_mtp_windows-${TARGET_TRIPLE}"
+[ -f "${WIN_PLACEHOLDER}" ] || touch "${WIN_PLACEHOLDER}"
+
+# Build Swift sync helper if needed
 SYNC_BIN="src-tauri/src/native/gobirdie-sync-helper-${TARGET_TRIPLE}"
 if [ ! -f "${SYNC_BIN}" ] || [ "src-tauri/src/native/Sources/main.swift" -nt "${SYNC_BIN}" ]; then
     echo "Building gobirdie-sync-helper..."

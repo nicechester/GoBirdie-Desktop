@@ -58,9 +58,25 @@
 활동 FIT 파일의 mesg #104에서 5분 이동 평균으로 캡처됩니다. 비율(백스윙:다운스윙)은 라운드 헤더, 타임라인 차트, 샷 팝업에 표시됩니다.
 
 ### AI에게 물어보기
-✨ AI에게 물어보기 버튼은 모든 라운드 데이터로 종합 마크다운 프롬프트를 생성하여 클립보드에 복사합니다. [Gemini](https://gemini.google.com) 또는 [ChatGPT](https://chatgpt.com)에 바로 붙여넣기할 수 있습니다.
+✨ AI에게 물어보기 버튼은 파인튜닝된 3B 언어 모델([BLLOSSOM](https://huggingface.co/Bllossom/llama-3.2-Korean-Bllossom-3B))을 기기 내에서 [mlx-lm](https://github.com/ml-explore/mlx-lm)으로 실행하는 코칭 패널을 엽니다. 외부 API 호출 없이 데이터가 기기 밖으로 나가지 않습니다.
 
-![AI에게 물어보기](images/ko/ask-ai.png)
+**온디바이스 AI 코칭 사전 요구사항 (Apple Silicon Mac 전용):**
+```bash
+# Python 3.10 이상 필요 (pyenv 권장)
+brew install pyenv
+pyenv install 3.11
+pyenv global 3.11
+
+# mlx-lm 설치
+pip install mlx-lm
+```
+그 다음 모델을 다운로드하여 앱 데이터 디렉토리에 배치하세요:
+```
+~/Library/Application Support/go-birdie-desktop/gobirdie-bllossom-4bit/
+```
+설치 후 설정에서 **온디바이스 코칭**을 활성화하세요. 모델이 없으면 AI에게 물어보기 버튼은 클립보드 모드로 전환됩니다 — [Gemini](https://gemini.google.com) 또는 [ChatGPT](https://chatgpt.com)에 붙여넣을 수 있는 프롬프트를 복사합니다.
+
+> **참고:** 온디바이스 코칭은 기본적으로 비활성화되어 있습니다. 모델과 mlx-lm 설치 후 설정에서 활성화하세요.
 
 ### AI 인사이트 (온디바이스 딥러닝)
 각 라운드 상세 화면에 온디바이스 LSTM+Dense 모델이 생성한 패턴 인사이트가 표시됩니다. 외부 API 호출 없이 기기 내에서 완전히 실행되며 데이터가 외부로 전송되지 않습니다.

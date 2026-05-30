@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getLang, t } from './i18n.js';
-import { buildAiPrompt, state } from './app.js';
+import { buildAiPrompt, state, computeStrokesGained } from './app.js';
 
 let _unlisten = null;
 let _streaming = false;
@@ -48,6 +48,14 @@ function _buildModal(roundId) {
                 <div id="coaching-text" class="text-gray-700 leading-relaxed text-sm"></div>
             </div>
 
+            <!-- Notes input -->
+            <div id="coaching-notes-area" class="px-6 pt-4 pb-2 flex-shrink-0">
+                <textarea id="coaching-notes"
+                    placeholder="${t('coaching.notes.placeholder') || 'Add round notes (conditions, feelings, equipment changes...)'}"
+                    class="w-full text-sm text-gray-700 border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-purple-300"
+                    rows="3"></textarea>
+            </div>
+
             <!-- Footer -->
             <div class="flex items-center justify-between px-6 py-3 border-t flex-shrink-0">
                 <button id="coaching-analyze-btn"
@@ -87,7 +95,8 @@ export function openCoachingModal(roundId) {
     document.getElementById('coaching-analyze-btn').addEventListener('click', async () => {
         if (_streaming) return;
         _rawText = '';
-        await _startStreaming(roundId, lang);
+        const notes = document.getElementById('coaching-notes')?.value?.trim() || null;
+        await _startStreaming(roundId, lang, notes);
     });
 
     // Copy button
@@ -102,11 +111,9 @@ export function openCoachingModal(roundId) {
         });
     });
 
-    // Auto-start on open
+    // Auto-start on open — skip if notes area is present (user clicks manually)
     if (!state.isAppleSilicon || state.settings?.on_device_coaching === false) {
         _clipboardFallback(roundId);
-    } else {
-        document.getElementById('coaching-analyze-btn').click();
     }
 }
 
@@ -145,7 +152,7 @@ function _clipboardFallback(roundId) {
     });
 }
 
-async function _startStreaming(roundId, lang) {
+async function _startStreaming(roundId, lang, notes = null) {
     _streaming = true;
 
     const btn      = document.getElementById('coaching-analyze-btn');
@@ -162,6 +169,8 @@ async function _startStreaming(roundId, lang) {
     btnIcon.textContent = '⏳';
     btnLabel.textContent = t('coaching.analyzing');
 
+    document.getElementById('coaching-notes-area')?.classList.add('hidden');
+
     const preview = document.getElementById('coaching-stream-preview');
     const previewText = document.getElementById('coaching-stream-text');
     if (preview) { preview.classList.add('hidden'); }
@@ -171,6 +180,7 @@ async function _startStreaming(roundId, lang) {
     if (_unlisten) { _unlisten(); _unlisten = null; }
 
     let _rawText = '';
+    let _cleanedText = '';
     let firstContent = true;
 
     _unlisten = await listen('coaching_token', (event) => {
@@ -182,11 +192,15 @@ async function _startStreaming(roundId, lang) {
             const cleaned = _rawText
                 .replace(/\(\d+[~\-]\d+字[^)]*\)\s*/g, '')
                 .replace(/\(\d+[~\-]\d+\s*자[^)]*\)\s*/g, '')
+                .replace(/(<\|eot_id\|>|[!?:;]){3,}\s*$/g, '')
+                .replace(/([!?]\s*){3,}$/g, '')
+                .replace(/^[\s\S]*?(?=^##)/m, '')
                 .trim();
             const preview = document.getElementById('coaching-stream-preview');
             if (preview) preview.classList.add('hidden');
             status.classList.add('hidden');
             textEl.innerHTML = _renderMarkdown(cleaned);
+            _cleanedText = cleaned;
             output.classList.remove('hidden');
             _onStreamDone(btn, btnLabel, btnIcon, status);
             return;
@@ -215,10 +229,11 @@ async function _startStreaming(roundId, lang) {
     // Store rawText reference on the modal for copy button
     document.getElementById('coaching-modal-backdrop')._rawText = () => _rawText;
 
-    // Fix copy button to use closure
+    // Fix copy button to use cleaned text
     document.getElementById('coaching-copy-btn').onclick = () => {
-        if (!_rawText) return;
-        navigator.clipboard.writeText(_rawText).then(() => {
+        const text = _cleanedText || _rawText;
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
             const btn = document.getElementById('coaching-copy-btn');
             if (btn) {
                 btn.textContent = '✓ Copied';
@@ -227,8 +242,32 @@ async function _startStreaming(roundId, lang) {
         });
     };
 
+    // Compute SG + health data to pass to backend
+    let sgData = null;
     try {
-        await invoke('generate_coaching_report', { id: roundId, lang });
+        const round = await invoke('get_round_detail', { id: roundId });
+        if (round) {
+            const sg = computeStrokesGained(round);
+            if (sg) {
+                sgData = {
+                    total: +sg.total.toFixed(2),
+                    tee: +sg.categories.off_tee.toFixed(2),
+                    approach: +sg.categories.approach.toFixed(2),
+                    short_game: +sg.categories.short_game.toFixed(2),
+                    putting: +sg.categories.putting.toFixed(2),
+                    shots: sg.shots.map(s => ({
+                        hole: s.hole,
+                        club: s.club,
+                        dist: s.distBefore,
+                        sg: +s.sg.toFixed(2),
+                    })),
+                };
+            }
+        }
+    } catch (_) {}
+
+    try {
+        await invoke('generate_coaching_report', { id: roundId, lang, notes, sgData });
     } catch (e) {
         const preview = document.getElementById('coaching-stream-preview');
         if (preview) preview.classList.add('hidden');
@@ -252,11 +291,9 @@ function _onStreamDone(btn, btnLabel, btnIcon, status) {
 
 function _renderMarkdown(md) {
     // Strip everything before the first ## header (leaked preamble lines)
-    const firstHeader = md.indexOf('\n## ');
+    const firstHeader = md.search(/^##/m);
     if (firstHeader > 0) {
-        md = md.slice(firstHeader + 1);
-    } else if (md.startsWith('## ') === false && md.indexOf('## ') > 0) {
-        md = md.slice(md.indexOf('## '));
+        md = md.slice(firstHeader);
     }
     md = md.trim();
 
