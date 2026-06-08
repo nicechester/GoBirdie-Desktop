@@ -306,6 +306,7 @@ export const STRINGS = {
         'sync.android.notfound': 'Android phone not found on network. Enable Sync Server in GoBirdie Settings.',
     },
 
+
     ko: {
         // Header
         'app.title': 'Desktop',

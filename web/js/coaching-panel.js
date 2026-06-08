@@ -91,12 +91,18 @@ export function openCoachingModal(roundId) {
     document.getElementById('coaching-modal-close').addEventListener('click', _closeModal);
     modal.addEventListener('click', e => { if (e.target === modal) _closeModal(); });
 
+    const useOnDevice = state.isAppleSilicon && state.settings?.on_device_coaching !== false;
+
     // Analyze button
     document.getElementById('coaching-analyze-btn').addEventListener('click', async () => {
         if (_streaming) return;
         _rawText = '';
         const notes = document.getElementById('coaching-notes')?.value?.trim() || null;
-        await _startStreaming(roundId, lang, notes);
+        if (useOnDevice) {
+            await _startStreaming(roundId, lang, notes);
+        } else {
+            _clipboardFallback(roundId);
+        }
     });
 
     // Copy button
@@ -111,8 +117,8 @@ export function openCoachingModal(roundId) {
         });
     });
 
-    // Auto-start on open — skip if notes area is present (user clicks manually)
-    if (!state.isAppleSilicon || state.settings?.on_device_coaching === false) {
+    // Auto-start clipboard fallback on open when on-device AI is disabled
+    if (!useOnDevice) {
         _clipboardFallback(roundId);
     }
 }

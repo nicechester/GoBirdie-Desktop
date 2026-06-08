@@ -3369,7 +3369,7 @@ async function handleAppleSync() {
     const btn   = document.getElementById('apple-sync-btn');
     const label = document.getElementById('apple-sync-label');
     btn.disabled = true;
-    label.textContent = t('sync.apple.syncing');
+    label.textContent = t('sync.syncing');
 
     try {
         const newSummaries = await syncAppleRounds();
@@ -3387,7 +3387,7 @@ async function handleAppleSync() {
     } finally {
         state.syncing = false;
         btn.disabled = false;
-        label.textContent = t('sync.apple.label');
+        label.textContent = t('sync.label');
     }
 }
 
@@ -3428,7 +3428,7 @@ async function handleSync() {
     const btn   = document.getElementById('sync-btn');
     const label = document.getElementById('sync-label');
     btn.disabled = true;
-    label.textContent = 'Syncing...';
+    label.textContent = t('sync.syncing');
 
     try {
         const newSummaries = await syncRounds(PAGE_SIZE, 0);
@@ -3447,7 +3447,7 @@ async function handleSync() {
     } finally {
         state.syncing = false;
         btn.disabled = false;
-        label.textContent = 'Sync Watch';
+        label.textContent = t('sync.label');
     }
 }
 
