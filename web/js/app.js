@@ -58,6 +58,10 @@ async function syncAndroidRounds() {
     return invoke('sync_android_rounds');
 }
 
+async function syncMobileWifi(host) {
+    return invoke('sync_mobile_wifi', { host: host ?? null });
+}
+
 async function getPlatform() {
     return invoke('get_platform');
 }
@@ -3229,10 +3233,10 @@ function renderSetupModal(isFirstRun) {
                         <div class="device-name">${t('setup.device.garmin')}</div>
                         <div class="device-desc">${t('setup.device.garmin.desc')}</div>
                     </div>
-                    <div class="device-option ${device === 'apple' ? 'selected' : ''}" data-device="apple" ${state.platform === 'windows' ? 'style="display:none"' : ''}>
-                        <div class="device-icon">⌚</div>
+                    <div class="device-option ${device === 'apple' ? 'selected' : ''}" data-device="apple">
+                        <div class="device-icon">📱</div>
                         <div class="device-name">${t('setup.device.apple')}</div>
-                        <div class="device-desc">${t('setup.device.apple.desc')}</div>
+                        <div class="device-desc">${state.platform === 'windows' ? t('setup.device.apple.wifi') : t('setup.device.apple.desc')}</div>
                     </div>
                     <div class="device-option ${device === 'android' ? 'selected' : ''}" data-device="android">
                         <div class="device-icon">📱</div>
@@ -3364,6 +3368,13 @@ function renderSetupModal(isFirstRun) {
 
 async function handleAppleSync() {
     if (state.syncing) return;
+
+    // On Windows, MultipeerConnectivity isn't available — use WiFi sync instead
+    if (state.platform === 'windows') {
+        await handleMobileWifiSync('apple');
+        return;
+    }
+
     state.syncing = true;
 
     const btn   = document.getElementById('apple-sync-btn');
@@ -3393,15 +3404,22 @@ async function handleAppleSync() {
 
 async function handleAndroidSync() {
     if (state.syncing) return;
+    await handleMobileWifiSync('android');
+}
+
+async function handleMobileWifiSync(source, manualHost) {
+    if (state.syncing) return;
     state.syncing = true;
 
-    const btn   = document.getElementById('android-sync-btn');
-    const label = document.getElementById('android-sync-label');
-    btn.disabled = true;
-    label.textContent = t('sync.android.syncing');
+    const btnId = source === 'apple' ? 'apple-sync-btn' : 'android-sync-btn';
+    const labelId = source === 'apple' ? 'apple-sync-label' : 'android-sync-label';
+    const btn   = document.getElementById(btnId);
+    const label = document.getElementById(labelId);
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = t('sync.syncing');
 
     try {
-        const newSummaries = await syncAndroidRounds();
+        const newSummaries = await syncMobileWifi(manualHost ?? null);
         const existing = new Map(state.rounds.map(r => [r.id, r]));
         newSummaries.forEach(r => existing.set(r.id, r));
         state.rounds = [...existing.values()].sort((a, b) => b.date.localeCompare(a.date));
@@ -3411,13 +3429,52 @@ async function handleAndroidSync() {
         toast(t('toast.synced', { count: newSummaries.length }));
         updateStats();
     } catch (e) {
-        const msg = String(e).includes('not found') ? t('sync.android.notfound') : t('toast.syncfail', { err: e });
-        toast(msg, true);
+        const errStr = String(e);
+        const isNotFound = errStr.includes('not found') || errStr.includes('timeout') || errStr.includes('mDNS');
+        if (isNotFound) {
+            // Offer manual IP fallback
+            showManualIpDialog(source);
+        } else {
+            toast(t('toast.syncfail', { err: e }), true);
+        }
     } finally {
         state.syncing = false;
-        btn.disabled = false;
-        label.textContent = t('sync.android.label');
+        if (btn) btn.disabled = false;
+        if (label) label.textContent = source === 'apple' ? t('sync.label') : t('sync.android.label');
     }
+}
+
+function showManualIpDialog(source) {
+    const modal = document.getElementById('setup-modal');
+    const appName = source === 'apple' ? 'GoBirdie (iPhone)' : 'GoBirdie (Android)';
+    modal.innerHTML = `
+    <div class="modal-card" style="max-width:380px">
+        <div class="text-center mb-4">
+            <div class="text-3xl mb-2">${source === 'apple' ? '📱' : '🤖'}</div>
+            <h2 class="text-lg font-bold text-gray-800">Phone Not Found</h2>
+            <p class="text-sm text-gray-500 mt-2">
+                Could not auto-discover ${appName} on the network.<br>
+                Make sure <b>Sync Server</b> is enabled in the app Settings,
+                then enter the phone's IP manually.
+            </p>
+        </div>
+        <div class="space-y-3">
+            <input id="manual-ip-input" type="text" placeholder="e.g. 192.168.1.42:7743"
+                class="w-full p-2.5 border rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
+            <div class="flex gap-3">
+                <button id="manual-ip-cancel" class="flex-1 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+                <button id="manual-ip-connect" class="flex-1 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">Connect</button>
+            </div>
+        </div>
+    </div>`;
+    modal.classList.remove('hidden');
+    modal.querySelector('#manual-ip-cancel').addEventListener('click', () => modal.classList.add('hidden'));
+    modal.querySelector('#manual-ip-connect').addEventListener('click', async () => {
+        const host = modal.querySelector('#manual-ip-input').value.trim();
+        if (!host) return;
+        modal.classList.add('hidden');
+        await handleMobileWifiSync(source, host);
+    });
 }
 
 async function handleSync() {
