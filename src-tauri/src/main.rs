@@ -7,6 +7,7 @@ mod mtp;
 mod inference;
 mod prompt_builder;
 mod slm;
+mod mobile_sync;
 #[cfg(not(target_os = "windows"))]
 mod apple_sync;
 mod android_sync;
