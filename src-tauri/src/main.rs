@@ -9,7 +9,6 @@ mod prompt_builder;
 mod slm;
 #[cfg(not(target_os = "windows"))]
 mod apple_sync;
-#[cfg(not(target_os = "windows"))]
 mod android_sync;
 
 
@@ -270,6 +269,28 @@ async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSumm
     Ok(new_summaries)
 }
 
+/// WiFi sync for both Android and iPhone (uses mDNS + HTTP, works on all platforms).
+/// iPhone requires Sync Server enabled in GoBirdie iOS Settings.
+#[tauri::command]
+async fn sync_mobile_wifi(host: Option<String>, state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
+    let (resolved_host, list) = android_sync::sync_all(host.as_deref())?;
+
+    let mut new_summaries = Vec::new();
+    for summary in list {
+        {
+            let store = state.store.lock().unwrap();
+            if store.contains_id(&summary.id) {
+                continue;
+            }
+        }
+        let round = android_sync::fetch_and_convert(&resolved_host, &summary.id)?;
+        let rs = RoundSummary::from(&round);
+        state.store.lock().unwrap().save_by_id(&summary.id, &round)?;
+        new_summaries.push(rs);
+    }
+
+    Ok(new_summaries)
+}
 #[tauri::command]
 async fn fetch_elevations(locations: Vec<String>, state: State<'_, AppState>) -> Result<Vec<Option<f64>>, String> {
     if locations.is_empty() {
@@ -557,6 +578,7 @@ fn main() {
             sync_apple_rounds,
             #[cfg(not(target_os = "windows"))]
             sync_android_rounds,
+            sync_mobile_wifi,
             delete_round,
             fetch_elevations,
             infer_patterns,
