@@ -88,7 +88,7 @@ fn run_inference_blocking(
     let n_batch: usize = 512;
 
     let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(6144))
+        .with_n_ctx(NonZeroU32::new(8192))
         .with_n_batch(n_batch as u32);
 
     let mut ctx = model.new_context(&backend, ctx_params)

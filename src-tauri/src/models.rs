@@ -17,11 +17,14 @@ pub struct Settings {
     pub exclude_outliers: bool,
     #[serde(default = "default_true")]
     pub on_device_coaching: bool,
+    #[serde(default = "default_handedness")]
+    pub handedness: String,     // "right" | "left"
 }
 
 fn default_tee_color() -> String { "Blue".to_string() }
 fn default_sg_baseline() -> String { "10".to_string() }
 fn default_true() -> bool { false }
+fn default_handedness() -> String { "right".to_string() }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -32,6 +35,7 @@ impl Default for Settings {
             sg_baseline: default_sg_baseline(),
             exclude_outliers: true,
             on_device_coaching: false,
+            handedness: default_handedness(),
         }
     }
 }

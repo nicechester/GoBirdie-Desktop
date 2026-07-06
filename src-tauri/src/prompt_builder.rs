@@ -170,7 +170,7 @@ pub fn build_coaching_prompt(
         "holes": sorted_holes.len(),
         "duration_min": (round.duration_seconds / 60.0) as u32,
         "handicap": settings.sg_baseline,
-        "hand": "left-handed",
+        "hand": if settings.handedness == "left" { "left-handed" } else { "right-handed" },
         "avg_hr": round.avg_heart_rate.unwrap_or(0),
         "max_hr": round.max_heart_rate.unwrap_or(0),
         "body_battery": {"start": bb_start, "end": bb_end},
@@ -210,9 +210,9 @@ pub fn build_coaching_prompt(
     let compact = serde_json::to_string(&data).unwrap_or_default();
 
     let instruction = if lang == "ko" {
-        "골프 코치로서 라운드 데이터를 분석하라. 한국어로: 1) 전체 요약, 2) 강점, 3) 개선점, 4) 패턴(템포/심박수/스트레스 vs 스코어), 5) 권고(최대3개). 데이터에 없는 사실은 만들지 마라."
+        "당신은 골프 코치입니다. 라운드를 분석해서 공백 제외 400~600자(약 250-300단어) 내외의 피드백을 제공해주세요.\n지정된 분량 안에서 반드시 명확한 개선점과 문장의 완결(마무리 마침표)을 지어 응답을 끝마쳐야 하며, 문장이 잘린 채로 종료되어서는 안 됩니다.\n\n1. 전체 성과 vs 핸디캡 (코스 난이도/슬로프 고려 필수)\n2. 잘한 점과 개선 필요 부분 (구체적 홀/수치 인용)\n3. 심박수 패턴과 스코어 연관성\n4. 한 가지 실천 포커스\n\n구체적으로 수치를 인용해주세요. 지레짐작으로 스코어 용어를 혼동하지 마십시오."
     } else {
-        "You are a golf coach. Analyze the round data. Provide: 1) Summary, 2) Strengths, 3) Weaknesses, 4) Patterns (tempo/HR/stress vs score), 5) Recommendations (max 3). Do not invent facts."
+        "You are a golf coach. Analyze the round and provide 150-200 word feedback.\nEnsure the text is fully completed and wraps up with a clear conclusion within this length limit. Do not cut off mid-sentence.\n\n1. Overall performance vs handicap (Consider Course Difficulty/Slope)\n2. Key strengths and areas to improve (cite specific holes/metrics)\n3. Heart rate patterns and correlation to score\n4. One actionable practice focus\n\nBe direct. Cite numbers. No generic advice."
     };
 
     // Verification line

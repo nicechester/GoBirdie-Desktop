@@ -2958,6 +2958,8 @@ function buildAiPrompt(round) {
     L.push(`${t('ai.course')}: ${sc?.course_name ?? 'Unknown'} (${sc?.tee_color ?? ''} tees, Rating ${sc?.course_rating ?? ''}, Slope ${sc?.slope ?? ''})`);
     L.push(`${t('ai.score')}: ${sc?.total_score ?? '—'} (${overPar >= 0 ? '+' : ''}${overPar}) over par ${scoredPar}`);
     L.push(`${t('ai.holes')}: ${sc?.hole_scores.length ?? '—'}, ${t('ai.duration')}: ${Math.round(round.duration_seconds / 60)} min, ${t('ai.distance')}: ${(round.distance_meters / 1000).toFixed(2)} km`);
+    const handStr = state.settings?.handedness === 'left' ? 'Left-handed' : 'Right-handed';
+    L.push(`Handedness: ${handStr}`);
     L.push(`${t('ai.calories')}: ${round.calories ?? '—'}, ${t('ai.avghr')}: ${round.avg_heart_rate ?? '—'} bpm, ${t('ai.maxhr')}: ${round.max_heart_rate ?? '—'} bpm`);
     if (round.min_altitude_meters != null)
         L.push(`${t('ai.altitude')}: ${mToFt(round.min_altitude_meters)}–${mToFt(round.max_altitude_meters)} ft`);
@@ -3208,6 +3210,7 @@ function renderSetupModal(isFirstRun) {
     const sgBaseline = state.settings?.sg_baseline ?? '10';
     const excludeOutliers = state.settings?.exclude_outliers ?? true;
     const onDeviceCoaching = state.isAppleSilicon ? (state.settings?.on_device_coaching ?? true) : false;
+    const handedness = state.settings?.handedness ?? 'right';
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3224,6 +3227,19 @@ function renderSetupModal(isFirstRun) {
                 <label class="block text-sm font-medium text-gray-700 mb-1">${t('setup.name')}</label>
                 <input type="text" id="setup-name" value="${name}" placeholder="${t('setup.name.placeholder')}"
                     class="w-full p-2.5 border rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">${t('settings.handedness') || 'Handedness'}</label>
+                <div class="flex gap-3">
+                    <button class="hand-option flex-1 py-2 rounded-lg border text-sm font-medium transition
+                        ${handedness === 'right' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-hand="right">
+                        🏌️ ${t('settings.handedness.right') || 'Right-handed'}
+                    </button>
+                    <button class="hand-option flex-1 py-2 rounded-lg border text-sm font-medium transition
+                        ${handedness === 'left' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-hand="left">
+                        🏌️ ${t('settings.handedness.left') || 'Left-handed'}
+                    </button>
+                </div>
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">${t('setup.device')}</label>
@@ -3306,6 +3322,19 @@ function renderSetupModal(isFirstRun) {
     let selectedDevice = device;
     let selectedLang = lang;
     let selectedSgBaseline = sgBaseline;
+    let selectedHandedness = handedness;
+
+    modal.querySelectorAll('.hand-option').forEach(el => {
+        el.addEventListener('click', () => {
+            modal.querySelectorAll('.hand-option').forEach(o => {
+                o.classList.remove('border-blue-500', 'bg-blue-50', 'text-blue-700');
+                o.classList.add('border-gray-200', 'text-gray-600');
+            });
+            el.classList.add('border-blue-500', 'bg-blue-50', 'text-blue-700');
+            el.classList.remove('border-gray-200', 'text-gray-600');
+            selectedHandedness = el.dataset.hand;
+        });
+    });
 
     modal.querySelectorAll('.device-option').forEach(el => {
         el.addEventListener('click', () => {
@@ -3347,7 +3376,7 @@ function renderSetupModal(isFirstRun) {
         }
         const outliers = modal.querySelector('#setup-outliers')?.checked ?? true;
         const onDevice = state.isAppleSilicon ? (modal.querySelector('#setup-ondevice')?.checked ?? true) : false;
-        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline, exclude_outliers: outliers, on_device_coaching: onDevice };
+        const settings = { player_name: playerName, device_source: selectedDevice, sg_baseline: selectedSgBaseline, exclude_outliers: outliers, on_device_coaching: onDevice, handedness: selectedHandedness };
         try {
             await saveSettings(settings);
             state.settings = settings;
