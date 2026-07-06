@@ -135,8 +135,14 @@ fn run_inference_blocking(
             break;
         }
 
-        let bytes = model.token_to_piece_bytes(token, 8, false, None)
-            .map_err(|e| format!("Token to bytes: {}", e))?;
+        let bytes = match model.token_to_piece_bytes(token, 32, false, None) {
+            Ok(b) => b,
+            Err(llama_cpp_2::TokenToStringError::InsufficientBufferSpace(needed)) => {
+                model.token_to_piece_bytes(token, needed.unsigned_abs() as usize, false, None)
+                    .map_err(|e| format!("Token to bytes: {}", e))?
+            }
+            Err(e) => return Err(format!("Token to bytes: {}", e)),
+        };
         byte_buf.extend_from_slice(&bytes);
 
         // Flush all complete UTF-8 chars from the buffer, hold back incomplete tail
