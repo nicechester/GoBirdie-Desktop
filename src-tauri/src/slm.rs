@@ -117,9 +117,9 @@ fn run_inference_blocking(
 
     // Sampler: repetition penalty + top_p + temp + dist
     let mut sampler = LlamaSampler::chain_simple([
-        LlamaSampler::penalties(64, 1.05, 0.0, 0.0),
-        LlamaSampler::top_p(0.9, 1),
-        LlamaSampler::temp(0.3),
+        LlamaSampler::penalties(64, 1.15, 0.0, 0.0),
+        LlamaSampler::top_p(0.8, 1),
+        LlamaSampler::temp(0.15),
         LlamaSampler::dist(42),
     ]);
 
