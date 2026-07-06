@@ -114,12 +114,12 @@ jobs:
             -OutFile "src-tauri\resources\gobirdie-bllossom-Q4_K_M.gguf"
 
       - name: Build Windows MTP helper
-        shell: cmd
+        shell: pwsh
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          cl /W3 /EHsc /Fe:"src-tauri\src\native\garmin_mtp_windows-x86_64-pc-windows-msvc.exe" ^
-            src-tauri\src\native\garmin_mtp_windows.cpp ^
-            /link Propsys.lib PortableDeviceGuids.lib Ole32.lib oleaut32.lib
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+          cmd /c "`"$vcvars`" && cl /W3 /EHsc /Fe:`"src-tauri\src\native\garmin_mtp_windows-x86_64-pc-windows-msvc.exe`" src-tauri\src\native\garmin_mtp_windows.cpp /link Propsys.lib PortableDeviceGuids.lib Ole32.lib oleaut32.lib"
 
       - name: Create binary placeholders for Tauri
         shell: cmd
