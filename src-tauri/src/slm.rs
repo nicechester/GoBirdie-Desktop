@@ -119,13 +119,13 @@ fn run_inference_blocking(
     let mut sampler = LlamaSampler::chain_simple([
         LlamaSampler::penalties(64, 1.05, 0.0, 0.0),
         LlamaSampler::top_p(0.9, 1),
-        LlamaSampler::temp(0.5),
+        LlamaSampler::temp(0.3),
         LlamaSampler::dist(42),
     ]);
 
     let eot_token = model.token_eos();
-    let mut decoder = encoding_rs::UTF_8.new_decoder();
     let mut full_text = String::new();
+    let mut byte_buf: Vec<u8> = Vec::new();
 
     for i in 0..max_tokens {
         let token = sampler.sample(&ctx, -1);
@@ -135,16 +135,26 @@ fn run_inference_blocking(
             break;
         }
 
-        let piece = model.token_to_piece(token, &mut decoder, false, None)
-            .map_err(|e| format!("Token to str: {}", e))?;
+        let bytes = model.token_to_piece_bytes(token, 8, false, None)
+            .map_err(|e| format!("Token to bytes: {}", e))?;
+        byte_buf.extend_from_slice(&bytes);
 
-        full_text.push_str(&piece);
-        if full_text.contains("<|eot_id|>") {
-            break;
+        // Flush all complete UTF-8 chars from the buffer, hold back incomplete tail
+        let valid_up_to = match std::str::from_utf8(&byte_buf) {
+            Ok(_) => byte_buf.len(),
+            Err(e) => e.valid_up_to(),
+        };
+
+        if valid_up_to > 0 {
+            let piece = std::str::from_utf8(&byte_buf[..valid_up_to]).unwrap().to_string();
+            byte_buf = byte_buf[valid_up_to..].to_vec();
+            full_text.push_str(&piece);
+            if full_text.contains("<|eot_id|>") {
+                break;
+            }
+            app.emit("coaching_token", CoachingToken { text: piece, done: false })
+                .map_err(|e| e.to_string())?;
         }
-
-        app.emit("coaching_token", CoachingToken { text: piece, done: false })
-            .map_err(|e| e.to_string())?;
 
         // Prepare next decode step
         batch.clear();
