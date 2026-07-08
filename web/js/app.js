@@ -3220,6 +3220,7 @@ function renderSetupModal(isFirstRun) {
                 <span class="text-red-500">Go</span><span class="text-blue-600">Birdie</span>
                 ${!isFirstRun ? ` <span class="text-gray-400 font-normal text-base">${t('settings.title')}</span>` : ''}
             </h2>
+            <p class="text-xs text-gray-400 mt-1">v2.3.4</p>
             ${isFirstRun ? `<p class="text-sm text-gray-500 mt-1">${t('setup.subtitle')}</p>` : ''}
         </div>
         <div class="space-y-5">
@@ -3233,11 +3234,11 @@ function renderSetupModal(isFirstRun) {
                 <div class="flex gap-3">
                     <button class="hand-option flex-1 py-2 rounded-lg border text-sm font-medium transition
                         ${handedness === 'right' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-hand="right">
-                        🏌️ ${t('settings.handedness.right') || 'Right-handed'}
+                        ${t('settings.handedness.right') || 'Right-handed'}
                     </button>
                     <button class="hand-option flex-1 py-2 rounded-lg border text-sm font-medium transition
                         ${handedness === 'left' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}" data-hand="left">
-                        🏌️ ${t('settings.handedness.left') || 'Left-handed'}
+                        ${t('settings.handedness.left') || 'Left-handed'}
                     </button>
                 </div>
             </div>

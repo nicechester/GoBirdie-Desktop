@@ -48,14 +48,6 @@ function _buildModal(roundId) {
                 <div id="coaching-text" class="text-gray-700 leading-relaxed text-sm"></div>
             </div>
 
-            <!-- Notes input -->
-            <div id="coaching-notes-area" class="px-6 pt-4 pb-2 flex-shrink-0">
-                <textarea id="coaching-notes"
-                    placeholder="${t('coaching.notes.placeholder') || 'Add round notes (conditions, feelings, equipment changes...)'}"
-                    class="w-full text-sm text-gray-700 border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-purple-300"
-                    rows="3"></textarea>
-            </div>
-
             <!-- Footer -->
             <div class="flex items-center justify-between px-6 py-3 border-t flex-shrink-0">
                 <button id="coaching-analyze-btn"
@@ -97,9 +89,8 @@ export function openCoachingModal(roundId) {
     document.getElementById('coaching-analyze-btn').addEventListener('click', async () => {
         if (_streaming) return;
         _rawText = '';
-        const notes = document.getElementById('coaching-notes')?.value?.trim() || null;
         if (useOnDevice) {
-            await _startStreaming(roundId, lang, notes);
+            await _startStreaming(roundId, lang);
         } else {
             _clipboardFallback(roundId);
         }
@@ -158,7 +149,7 @@ function _clipboardFallback(roundId) {
     });
 }
 
-async function _startStreaming(roundId, lang, notes = null) {
+async function _startStreaming(roundId, lang) {
     _streaming = true;
 
     const btn      = document.getElementById('coaching-analyze-btn');
@@ -174,8 +165,6 @@ async function _startStreaming(roundId, lang, notes = null) {
     btn.disabled = true;
     btnIcon.textContent = '⏳';
     btnLabel.textContent = t('coaching.analyzing');
-
-    document.getElementById('coaching-notes-area')?.classList.add('hidden');
 
     const preview = document.getElementById('coaching-stream-preview');
     const previewText = document.getElementById('coaching-stream-text');
@@ -273,7 +262,7 @@ async function _startStreaming(roundId, lang, notes = null) {
     } catch (_) {}
 
     try {
-        await invoke('generate_coaching_report', { id: roundId, lang, notes, sgData });
+        await invoke('generate_coaching_report', { id: roundId, lang, sgData });
     } catch (e) {
         const preview = document.getElementById('coaching-stream-preview');
         if (preview) preview.classList.add('hidden');
