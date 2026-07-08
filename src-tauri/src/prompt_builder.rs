@@ -55,16 +55,17 @@ pub fn build_coaching_prompt(
 
     let total_par: i32 = sorted_holes
         .iter()
+        .filter(|h| h.score > 0)
         .map(|h| par_map.get(&h.hole_number).copied().unwrap_or(4) as i32)
         .sum();
 
-    let total_putts: u32 = sorted_holes.iter().map(|h| h.putts as u32).sum();
+    let total_putts: u32 = sorted_holes.iter().filter(|h| h.score > 0).map(|h| h.putts as u32).sum();
     let total_score = sc.total_score as i32;
     let over_par = total_score - total_par;
 
-    let n_holes = sorted_holes.len();
-    let front: Vec<_> = sorted_holes.iter().filter(|h| h.hole_number <= 9).collect();
-    let back: Vec<_> = sorted_holes.iter().filter(|h| h.hole_number > 9).collect();
+    let n_holes = sorted_holes.iter().filter(|h| h.score > 0).count();
+    let front: Vec<_> = sorted_holes.iter().filter(|h| h.hole_number <= 9 && h.score > 0).collect();
+    let back: Vec<_> = sorted_holes.iter().filter(|h| h.hole_number > 9 && h.score > 0).collect();
     let front_score: i32 = front.iter().map(|h| h.score as i32).sum();
     let back_score: i32 = back.iter().map(|h| h.score as i32).sum();
 
@@ -101,6 +102,9 @@ pub fn build_coaching_prompt(
     user_msg.push_str("\n## Hole-by-Hole Scorecard\nHole | Par | Score | +/- | Score Type | Putts\n-----|-----|-------|-----|------------|------\n");
 
     for hole in &sorted_holes {
+        if hole.score == 0 {
+            continue;
+        }
         let par = par_map.get(&hole.hole_number).copied().unwrap_or(4) as i8;
         let diff = hole.score as i8 - par;
         user_msg.push_str(&format!(
