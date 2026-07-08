@@ -247,6 +247,11 @@ fn get_is_apple_silicon() -> bool {
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))] { false }
 }
 
+#[tauri::command]
+fn get_app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 async fn sync_android_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
@@ -575,6 +580,7 @@ fn main() {
             get_settings,
             save_settings,
             get_platform,
+            get_app_version,
             #[cfg(not(target_os = "windows"))]
             sync_apple_rounds,
             #[cfg(not(target_os = "windows"))]

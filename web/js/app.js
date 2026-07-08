@@ -70,6 +70,10 @@ async function getIsAppleSilicon() {
     return invoke('get_is_apple_silicon');
 }
 
+async function getAppVersion() {
+    return invoke('get_app_version');
+}
+
 async function deleteRound(id) {
     return invoke('delete_round', { id });
 }
@@ -3202,7 +3206,7 @@ function applySyncButtonVisibility() {
     }
 }
 
-function renderSetupModal(isFirstRun) {
+async function renderSetupModal(isFirstRun) {
     const modal = document.getElementById('setup-modal');
     const name = state.settings?.player_name ?? '';
     const device = state.settings?.device_source ?? '';
@@ -3211,6 +3215,7 @@ function renderSetupModal(isFirstRun) {
     const excludeOutliers = state.settings?.exclude_outliers ?? true;
     const onDeviceCoaching = state.isAppleSilicon ? (state.settings?.on_device_coaching ?? true) : false;
     const handedness = state.settings?.handedness ?? 'right';
+    const appVersion = await getAppVersion();
 
     modal.innerHTML = `
     <div class="modal-card">
@@ -3220,7 +3225,7 @@ function renderSetupModal(isFirstRun) {
                 <span class="text-red-500">Go</span><span class="text-blue-600">Birdie</span>
                 ${!isFirstRun ? ` <span class="text-gray-400 font-normal text-base">${t('settings.title')}</span>` : ''}
             </h2>
-            <p class="text-xs text-gray-400 mt-1">v2.3.4</p>
+            <p class="text-xs text-gray-400 mt-1">v${appVersion}</p>
             ${isFirstRun ? `<p class="text-sm text-gray-500 mt-1">${t('setup.subtitle')}</p>` : ''}
         </div>
         <div class="space-y-5">
@@ -3590,9 +3595,9 @@ function initHamburgerMenu() {
         showTrendsView();
     });
 
-    document.getElementById('menu-settings').addEventListener('click', () => {
+    document.getElementById('menu-settings').addEventListener('click', async () => {
         menu.classList.add('hidden');
-        renderSetupModal(false);
+        await renderSetupModal(false);
     });
 }
 
@@ -4375,7 +4380,7 @@ async function init() {
         const settings = await getSettings();
         if (!settings || !settings.device_source) {
             // First run — show setup modal, don't load data yet
-            renderSetupModal(true);
+            await renderSetupModal(true);
             return;
         }
         state.settings = settings;
@@ -4384,7 +4389,7 @@ async function init() {
     } catch (e) {
         console.error('Init error:', e);
         // If settings fetch fails, show setup anyway
-        renderSetupModal(true);
+        await renderSetupModal(true);
     }
 }
 
