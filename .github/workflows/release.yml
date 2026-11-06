@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-15
+    runs-on: macos-latest
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
 
