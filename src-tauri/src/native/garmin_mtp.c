@@ -21,10 +21,10 @@ static size_t stem_len(const char *filename) {
     return dot ? (size_t)(dot - filename) : strlen(filename);
 }
 
-static int cmp_id_desc(const void *a, const void *b) {
+static int cmp_mtime_desc(const void *a, const void *b) {
     const FileEntry *fa = (const FileEntry *)a;
     const FileEntry *fb = (const FileEntry *)b;
-    return (fb->id > fa->id) - (fb->id < fa->id);
+    return (fb->mtime > fa->mtime) - (fb->mtime < fa->mtime);
 }
 
 // Walk the file tree recursively to find a folder named `target`
@@ -126,11 +126,11 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "[folders] SCORCRDS=%u Activity=%u Clubs=%u PointCache=%u\n",
             folder_scorcrds, folder_activity, folder_clubs, folder_pointcache);
 
-    // Collect scorecard files from SCORCRDS (.fit) and PointCache (.gpc)
+    // Collect scorecard files from SCORCRDS (.fit files only)
+    // Note: .gpc files in PointCache are GPS point cache, NOT scorecards
     FileEntry sc_files[MAX_ROUNDS * 2];
     int sc_count = 0;
 
-    // Scan SCORCRDS folder (.fit scorecards)
     LIBMTP_file_t *f = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_scorcrds);
     while (f && sc_count < MAX_ROUNDS * 2) {
         if (f->filesize > 0 && f->filetype != LIBMTP_FILETYPE_FOLDER) {
@@ -146,27 +146,7 @@ int main(int argc, char *argv[]) {
         f = next;
     }
 
-    // Scan PointCache folder (.gpc scorecards — new firmware)
-    if (folder_pointcache) {
-        f = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_pointcache);
-        while (f && sc_count < MAX_ROUNDS * 2) {
-            // Only collect .gpc files (golf point cache)
-            const char *ext = strrchr(f->filename, '.');
-            if (f->filesize > 0 && ext && strcmp(ext, ".gpc") == 0) {
-                sc_files[sc_count].id       = f->item_id;
-                sc_files[sc_count].filesize = f->filesize;
-                sc_files[sc_count].mtime    = f->modificationdate;
-                strncpy(sc_files[sc_count].filename, f->filename, 63);
-                sc_files[sc_count].filename[63] = '\0';
-                sc_count++;
-            }
-            LIBMTP_file_t *next = f->next;
-            LIBMTP_destroy_file_t(f);
-            f = next;
-        }
-    }
-
-    qsort(sc_files, sc_count, sizeof(FileEntry), cmp_id_desc);
+    qsort(sc_files, sc_count, sizeof(FileEntry), cmp_mtime_desc);
 
     // Download Clubs.fit
     char clubs_dest[512] = "";
@@ -207,22 +187,16 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < sc_count && downloaded < count; i++) {
         FileEntry *sc = &sc_files[i];
 
-        // Prefer activity with matching filename stem (same timestamp, different ext).
-        // Fall back to closest mtime within 3600s for older firmware .fit scorecards.
+        // Match scorecard to activity by closest mtime.
+        // Scorecard mtime is typically close to round end time.
+        // Allow up to 6 hours difference to handle timezone/sync delays.
         FileEntry *best_act = NULL;
         long best_diff = 999999;
-        size_t sc_stem = stem_len(sc->filename);
         for (int j = 0; j < act_count; j++) {
-            size_t act_stem = stem_len(act_files[j].filename);
-            if (sc_stem == act_stem && strncmp(sc->filename, act_files[j].filename, sc_stem) == 0) {
-                best_act = &act_files[j];
-                best_diff = 0;
-                break;
-            }
             long diff = labs((long)act_files[j].mtime - (long)sc->mtime);
             if (diff < best_diff) { best_diff = diff; best_act = &act_files[j]; }
         }
-        if (!best_act || best_diff > 3600) continue;
+        if (!best_act || best_diff > 21600) continue;  // 6 hours max
         if (skipped < offset) { skipped++; continue; }
 
         char sc_dest[512], act_dest[512];
