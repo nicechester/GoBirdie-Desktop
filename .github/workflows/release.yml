@@ -41,7 +41,15 @@ jobs:
           echo "CXXFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
 
       - name: Install system dependencies
-        run: brew install libmtp cmake
+        run: brew install libmtp cmake openssl@3
+
+      - name: Set OpenSSL environment for llama.cpp build
+        run: |
+          OPENSSL_PREFIX=$(brew --prefix openssl@3)
+          echo "OPENSSL_ROOT_DIR=${OPENSSL_PREFIX}" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=${OPENSSL_PREFIX}/include" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=${OPENSSL_PREFIX}/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${OPENSSL_PREFIX}/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
       - name: Download GGUF model
         run: |
