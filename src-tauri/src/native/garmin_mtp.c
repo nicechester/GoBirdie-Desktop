@@ -14,6 +14,13 @@ typedef struct {
     time_t   mtime;
 } FileEntry;
 
+// Return the length of the filename stem (everything before the last '.').
+// If no dot, returns strlen(filename).
+static size_t stem_len(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    return dot ? (size_t)(dot - filename) : strlen(filename);
+}
+
 static int cmp_id_desc(const void *a, const void *b) {
     const FileEntry *fa = (const FileEntry *)a;
     const FileEntry *fb = (const FileEntry *)b;
@@ -102,6 +109,9 @@ int main(int argc, char *argv[]) {
         LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "Activity", 0);
     uint32_t folder_clubs    = find_folder_id(dev, storage,
         LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "Clubs", 0);
+    // New firmware stores .gpc scorecards in GARMIN/PointCache
+    uint32_t folder_pointcache = find_folder_id(dev, storage,
+        LIBMTP_FILES_AND_FOLDERS_ROOT, "GARMIN", "PointCache", 0);
 
     // Fall back to env vars or hardcoded defaults
     if (!folder_scorcrds) { const char *e = getenv("GARMIN_FOLDER_SCORCRDS");
@@ -110,16 +120,20 @@ int main(int argc, char *argv[]) {
         folder_activity = e ? (uint32_t)strtoul(e, NULL, 10) : 16777249; }
     if (!folder_clubs)    { const char *e = getenv("GARMIN_FOLDER_CLUBS");
         folder_clubs    = e ? (uint32_t)strtoul(e, NULL, 10) : 16777264; }
+    if (!folder_pointcache) { const char *e = getenv("GARMIN_FOLDER_POINTCACHE");
+        folder_pointcache = e ? (uint32_t)strtoul(e, NULL, 10) : 16777282; }
 
-    fprintf(stderr, "[folders] SCORCRDS=%u Activity=%u Clubs=%u\n",
-            folder_scorcrds, folder_activity, folder_clubs);
+    fprintf(stderr, "[folders] SCORCRDS=%u Activity=%u Clubs=%u PointCache=%u\n",
+            folder_scorcrds, folder_activity, folder_clubs, folder_pointcache);
 
-    // Collect scorecard files
+    // Collect scorecard files from SCORCRDS (.fit) and PointCache (.gpc)
     FileEntry sc_files[MAX_ROUNDS * 2];
     int sc_count = 0;
+
+    // Scan SCORCRDS folder (.fit scorecards)
     LIBMTP_file_t *f = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_scorcrds);
     while (f && sc_count < MAX_ROUNDS * 2) {
-        if (f->filesize > 0) {
+        if (f->filesize > 0 && f->filetype != LIBMTP_FILETYPE_FOLDER) {
             sc_files[sc_count].id       = f->item_id;
             sc_files[sc_count].filesize = f->filesize;
             sc_files[sc_count].mtime    = f->modificationdate;
@@ -127,8 +141,31 @@ int main(int argc, char *argv[]) {
             sc_files[sc_count].filename[63] = '\0';
             sc_count++;
         }
-        f = f->next;
+        LIBMTP_file_t *next = f->next;
+        LIBMTP_destroy_file_t(f);
+        f = next;
     }
+
+    // Scan PointCache folder (.gpc scorecards — new firmware)
+    if (folder_pointcache) {
+        f = LIBMTP_Get_Files_And_Folders(dev, storage->id, folder_pointcache);
+        while (f && sc_count < MAX_ROUNDS * 2) {
+            // Only collect .gpc files (golf point cache)
+            const char *ext = strrchr(f->filename, '.');
+            if (f->filesize > 0 && ext && strcmp(ext, ".gpc") == 0) {
+                sc_files[sc_count].id       = f->item_id;
+                sc_files[sc_count].filesize = f->filesize;
+                sc_files[sc_count].mtime    = f->modificationdate;
+                strncpy(sc_files[sc_count].filename, f->filename, 63);
+                sc_files[sc_count].filename[63] = '\0';
+                sc_count++;
+            }
+            LIBMTP_file_t *next = f->next;
+            LIBMTP_destroy_file_t(f);
+            f = next;
+        }
+    }
+
     qsort(sc_files, sc_count, sizeof(FileEntry), cmp_id_desc);
 
     // Download Clubs.fit
@@ -170,9 +207,18 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < sc_count && downloaded < count; i++) {
         FileEntry *sc = &sc_files[i];
 
+        // Prefer activity with matching filename stem (same timestamp, different ext).
+        // Fall back to closest mtime within 3600s for older firmware .fit scorecards.
         FileEntry *best_act = NULL;
         long best_diff = 999999;
+        size_t sc_stem = stem_len(sc->filename);
         for (int j = 0; j < act_count; j++) {
+            size_t act_stem = stem_len(act_files[j].filename);
+            if (sc_stem == act_stem && strncmp(sc->filename, act_files[j].filename, sc_stem) == 0) {
+                best_act = &act_files[j];
+                best_diff = 0;
+                break;
+            }
             long diff = labs((long)act_files[j].mtime - (long)sc->mtime);
             if (diff < best_diff) { best_diff = diff; best_act = &act_files[j]; }
         }
@@ -183,12 +229,16 @@ int main(int argc, char *argv[]) {
         snprintf(sc_dest,  sizeof(sc_dest),  "%s/%s", dest_dir, sc->filename);
         snprintf(act_dest, sizeof(act_dest), "%s/%s", dest_dir, best_act->filename);
 
-        if (LIBMTP_Get_File_To_File(dev, sc->id, sc_dest, NULL, NULL) != 0) {
+        int sc_ret = LIBMTP_Get_File_To_File(dev, sc->id, sc_dest, NULL, NULL);
+        if (sc_ret != 0) {
             fprintf(stderr, "Failed to download scorecard %s\n", sc->filename);
+            LIBMTP_Clear_Errorstack(dev);
             continue;
         }
-        if (LIBMTP_Get_File_To_File(dev, best_act->id, act_dest, NULL, NULL) != 0) {
+        int act_ret = LIBMTP_Get_File_To_File(dev, best_act->id, act_dest, NULL, NULL);
+        if (act_ret != 0) {
             fprintf(stderr, "Failed to download activity %s\n", best_act->filename);
+            LIBMTP_Clear_Errorstack(dev);
             continue;
         }
 

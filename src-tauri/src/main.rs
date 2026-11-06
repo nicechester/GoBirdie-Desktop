@@ -51,15 +51,19 @@ fn parse_and_save(
         }
     }
 
-    let mut round     = parser::parse_activity(act_path)?;
-    let mut scorecard = parser::parse_scorecard(sc_path)?;
+    let mut round = parser::parse_activity(act_path)?;
 
-    // Enrich shot positions with club info + health data
-    parser::enrich_shots(&mut scorecard, clubs, &round.health_timeline, &round.tempo_timeline);
+    // Try to parse scorecard — .gpc files (new firmware) are not FIT format, skip them
+    let sc_ext = sc_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if sc_ext != "gpc" {
+        if let Ok(mut scorecard) = parser::parse_scorecard(sc_path) {
+            parser::enrich_shots(&mut scorecard, clubs, &round.health_timeline, &round.tempo_timeline);
+            round.scorecard = Some(scorecard);
+        }
+    }
 
-    round.scorecard = Some(scorecard);
-    round.clubs     = clubs.to_vec();
-    round.id        = hash_file(act_path);
+    round.clubs = clubs.to_vec();
+    round.id = hash_file(act_path);
 
     let summary = RoundSummary::from(&round);
     store.save(act_path, &round)?;
