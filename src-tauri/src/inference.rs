@@ -134,6 +134,28 @@ pub fn build_feature_vector(round: &GolfRound) -> Vec<f32> {
     normalized
 }
 
+/// Round-level scalars occupy indices ROUND_SCALAR_START..INPUT_DIM
+/// (body battery, HR, tempo, driver yards, putts, score, holes, rate,
+/// duration, course rating, slope). Per-hole features are excluded.
+const ROUND_SCALAR_START: usize = 72;
+
+/// Allowed overshoot beyond the training range, as a fraction of the
+/// normalized range (normalized values are 0..=1 inside the training range).
+const OOD_TOLERANCE: f32 = 0.10;
+
+/// Out-of-distribution guard (issue #20). Takes the *normalized* feature
+/// vector from `build_feature_vector` and returns the indices of round-level
+/// scalars severely outside the training range. A non-empty result means the
+/// ML pattern output should be suppressed for this round.
+pub fn ood_round_scalars(normalized: &[f32]) -> Vec<usize> {
+    (ROUND_SCALAR_START..INPUT_DIM)
+        .filter(|&i| {
+            let v = normalized[i];
+            v < -OOD_TOLERANCE || v > 1.0 + OOD_TOLERANCE
+        })
+        .collect()
+}
+
 pub fn run_inference(model: &OnnxModel, features: &[f32]) -> Result<[f32; NUM_PATTERNS], String> {
     let input = tract_ndarray::Array2::from_shape_vec((1, features.len()), features.to_vec())
         .map_err(|e| e.to_string())?;
@@ -161,4 +183,31 @@ pub fn run_inference(model: &OnnxModel, features: &[f32]) -> Result<[f32; NUM_PA
     }
 
     Ok(result_array)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ood_passes_in_range_round() {
+        let normalized = vec![0.5f32; INPUT_DIM];
+        assert!(ood_round_scalars(&normalized).is_empty());
+    }
+
+    #[test]
+    fn ood_flags_driver_yards_outside_training_range() {
+        // Nov 6 Hansen Dam: driver_yards 168 vs trained 199.0..=206.1
+        let mut normalized = vec![0.5f32; INPUT_DIM];
+        normalized[76] = (168.0 - NORM_MIN[76]) / (NORM_MAX[76] - NORM_MIN[76]);
+        assert_eq!(ood_round_scalars(&normalized), vec![76]);
+    }
+
+    #[test]
+    fn ood_ignores_per_hole_features() {
+        // Per-hole indices (0..72) are not part of the round-level guard.
+        let mut normalized = vec![0.5f32; INPUT_DIM];
+        normalized[0] = -5.0;
+        assert!(ood_round_scalars(&normalized).is_empty());
+    }
 }

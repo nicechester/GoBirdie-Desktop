@@ -418,6 +418,14 @@ fn infer_patterns(id: String, state: State<'_, AppState>) -> Option<PatternVecto
     let model = state.onnx_model.as_ref()?;
     let round = state.store.lock().unwrap().load_by_id(&id)?;
     let features = inference::build_feature_vector(&round);
+    // OOD guard (issue #20): suppress ML pattern output when a round-level
+    // scalar is severely outside the training range. Rule-based insights are
+    // unaffected; the frontend simply receives no pattern vector.
+    let ood = inference::ood_round_scalars(&features);
+    if !ood.is_empty() {
+        eprintln!("infer_patterns: suppressed, out-of-range round scalars {:?}", ood);
+        return None;
+    }
     let probs = inference::run_inference(model, &features).ok()?;
     Some(PatternVector {
         driver_slice_risk:         probs[0],
