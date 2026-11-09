@@ -7,6 +7,40 @@ import { getLang, t } from './i18n.js';
 
 const SEVERITY_ORDER = { critical: 0, warning: 1, positive: 2, info: 3 };
 
+// SG consistency rule (issue #20): a weakness claim must not contradict
+// strokes-gained data. If the SG category a claim is about is at or above
+// SG_CONTRADICTS, the weakness insight is dropped. Only weakness severities
+// are filtered; positive and info insights pass through. Missing SG data
+// fails open (the insight stands).
+const SG_CONTRADICTS = 1.0;
+
+// Insight codes that blame a category, mapped to the SG category they describe.
+// Deliberately unmapped: PATTERN_FATIGUE_LATE_RELEASE, PATTERN_MENTAL_SNOWBALL,
+// PATTERN_SCORE_ANXIETY_COLLAPSE, PATTERN_PAR5_OVERAGGRESSIVE,
+// PATTERN_COURSE_RATING_STRESS (no SG counterpart), and THREE_PUTTS (a count
+// fact, not a category judgement).
+const INSIGHT_SG_CATEGORY = {
+    PATTERN_DRIVER_PULL_HOOK:        'off_tee',
+    PATTERN_DRIVER_SLICE:            'off_tee',
+    PATTERN_TEE_TEMPO_RUSH:          'off_tee',
+    PATTERN_IRON_CONTACT_ERROR:      'approach',
+    PATTERN_MID_RANGE_INCONSISTENCY: 'approach',
+    PATTERN_WEDGE_DISTANCE_CONTROL:  'short_game',
+    PATTERN_BUNKER_ESCAPE:           'short_game',
+    POOR_SCRAMBLING:                 'short_game',
+    PATTERN_PUTTING_3PUTT:           'putting',
+    PATTERN_LONG_PUTT_TEMPO:         'putting',
+    PATTERN_SHORT_PUTT_ALIGNMENT:    'putting',
+};
+
+export function isSgContradicted(insight, ctx) {
+    if (insight.severity !== 'critical' && insight.severity !== 'warning') return false;
+    const cat = INSIGHT_SG_CATEGORY[insight.code];
+    if (!cat) return false;
+    const sg = ctx?.sg?.categories?.[cat];
+    return typeof sg === 'number' && sg >= SG_CONTRADICTS;
+}
+
 // Evaluate all templates against context, return ranked insights
 export function generateInsights(ctx, maxInsights = 6) {
     if (!ctx) return [];
@@ -30,15 +64,19 @@ export function generateInsights(ctx, maxInsights = 6) {
         } catch (_) { /* skip if data missing */ }
     }
 
+    // SG consistency: drop weakness claims contradicted by SG before ranking,
+    // so a suppressed insight never takes a card slot.
+    const consistent = fired.filter(f => !isSgContradicted(f, ctx));
+
     // Sort: tier first, then severity
-    fired.sort((a, b) =>
+    consistent.sort((a, b) =>
         a.tier !== b.tier ? a.tier - b.tier :
         (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9)
     );
 
     // Cap: max 2 positives, rest critical/warning/info
-    const positives = fired.filter(f => f.severity === 'positive').slice(0, 2);
-    const others    = fired.filter(f => f.severity !== 'positive').slice(0, maxInsights - positives.length);
+    const positives = consistent.filter(f => f.severity === 'positive').slice(0, 2);
+    const others    = consistent.filter(f => f.severity !== 'positive').slice(0, maxInsights - positives.length);
     return [...others, ...positives].slice(0, maxInsights);
 }
 

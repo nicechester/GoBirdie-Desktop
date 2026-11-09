@@ -91,7 +91,7 @@ export const NLG_TEMPLATES = [
                 d => `You lost ${sgFmt(d.sg.categories.short_game)} strokes around the green. Getting up-and-down more consistently is the fastest way to lower your score.`,
             ],
             ko: [
-                d => `오늘 순게임에서 ${sgFmt(d.sg.categories.short_game)} 타를 잃었습니다. 50야드 이내 샷이 스코어를 좌우합니다 — 연습이 필요합니다.`,
+                d => `오늘 숏게임에서 ${sgFmt(d.sg.categories.short_game)} 타를 잃었습니다. 50야드 이내 샷이 스코어를 좌우합니다 — 연습이 필요합니다.`,
                 d => `스코어링 존(50야드 이내)에서 ${sgFmt(d.sg.categories.short_game)} 타 손실. 칩핑과 피칭 연습이 스코어에 큰 영향을 줄 것입니다.`,
                 d => `그린 주변에서 ${sgFmt(d.sg.categories.short_game)} 타를 잃었습니다. 업앤다운 성공률을 높이는 것이 스코어를 줄이는 가장 빠른 방법입니다.`,
             ],
@@ -131,6 +131,36 @@ export const NLG_TEMPLATES = [
                 d => `오늘 볼 스트라이킹이 훌륭했습니다 — 어프로치에서 ${sgFmt(d.sg.categories.approach)} 타 획득. 꾸준히 핀 가까이 붙였습니다.`,
                 d => `아이언 플레이로 ${sgFmt(d.sg.categories.approach)} 타를 벌었습니다. 이런 어프로치는 버디 기회를 만들고 퍼터 부담을 줄여줍니다.`,
                 d => `어프로치에서 ${sgFmt(d.sg.categories.approach)} 타 획득 — 오늘 게임에서 아이언이 가장 돋보였습니다.`,
+            ],
+        }
+    },
+    {
+        code: 'SG_SHORT_GAME_STRONG',
+        condition: d => d.sg.categories.short_game > 1.0,
+        severity: 'positive', tier: 1,
+        messages: {
+            en: [
+                d => `Your short game was a weapon today — ${sgFmt(d.sg.categories.short_game)} strokes gained around the greens. That's where your score was saved.`,
+                d => `You gained ${sgFmt(d.sg.categories.short_game)} strokes around the green — scrambling and wedge play carried the round.`,
+            ],
+            ko: [
+                d => `오늘 숏게임이 무기였습니다 — 그린 주변에서 ${sgFmt(d.sg.categories.short_game)} 타 획득. 스코어를 지킨 부분입니다.`,
+                d => `그린 주변에서 ${sgFmt(d.sg.categories.short_game)} 타를 벌었습니다 — 스크램블링과 웨지 플레이가 라운드를 이끌었습니다.`,
+            ],
+        }
+    },
+    {
+        code: 'SG_OFF_TEE_STRONG',
+        condition: d => d.sg.categories.off_tee > 1.0,
+        severity: 'positive', tier: 1,
+        messages: {
+            en: [
+                d => `Tee shots were a strength today — ${sgFmt(d.sg.categories.off_tee)} strokes gained off the tee. You set up every hole well.`,
+                d => `You gained ${sgFmt(d.sg.categories.off_tee)} strokes off the tee — driving gave you the platform for the rest of the game.`,
+            ],
+            ko: [
+                d => `오늘 티샷이 강점이었습니다 — 티에서 ${sgFmt(d.sg.categories.off_tee)} 타 획득. 모든 홀을 잘 세팅했습니다.`,
+                d => `티에서 ${sgFmt(d.sg.categories.off_tee)} 타를 벌었습니다 — 드라이브가 나머지 게임의 기반이 됐습니다.`,
             ],
         }
     },
@@ -209,7 +239,7 @@ export const NLG_TEMPLATES = [
                 d => `${d.scramblingPct}% scrambling despite ${d.girPct}% GIR is impressive. You're a tough competitor who doesn't give up on holes.`,
             ],
             ko: [
-                d => `GIR ${d.girPct}%지만 스크램블링을 잘 했습니다 — 순게임이 여러 타를 살렸습니다. 투지가 스코어를 지켰습니다.`,
+                d => `GIR ${d.girPct}%지만 스크램블링을 잘 했습니다 — 숏게임이 여러 타를 살렸습니다. 투지가 스코어를 지켰습니다.`,
                 d => `GIR ${d.girPct}%에도 스크램블링 ${d.scramblingPct}%는 인상적입니다. 홀을 포기하지 않는 강인한 경쟁자입니다.`,
             ],
         }
@@ -224,7 +254,7 @@ export const NLG_TEMPLATES = [
                 d => `${d.scramblingPct}% scrambling is brutal. You're not recovering from missed greens. This is costing you 4-5 shots per round.`,
             ],
             ko: [
-                d => `그린 ${100 - d.girPct}% 미스에 스크램블링 ${d.scramblingPct}% — 이중고. 순게임에 상당한 연습이 필요합니다.`,
+                d => `그린 ${100 - d.girPct}% 미스에 스크램블링 ${d.scramblingPct}% — 이중고. 숏게임에 상당한 연습이 필요합니다.`,
                 d => `스크램블링 ${d.scramblingPct}%는 심각합니다. 미스된 그린에서 회복하지 못하고 있습니다. 라운드당 4-5타 손실입니다.`,
             ],
         }
@@ -344,7 +374,7 @@ export const NLG_TEMPLATES = [
                 d => `You're not taking advantage of par 5s (avg +${d.par5AvgOverPar.toFixed(1)}). Better course management could save strokes here.`,
             ],
             ko: [
-                d => `파5 홀 평균 +${d.par5AvgOverPar.toFixed(1)} — 스코어링 홀에서 버디를 만들지 못하고 있습니다. 레이업 전략과 순게임을 개선하면 스코어가 낮아질 것입니다.`,
+                d => `파5 홀 평균 +${d.par5AvgOverPar.toFixed(1)} — 스코어링 홀에서 버디를 만들지 못하고 있습니다. 레이업 전략과 숏게임을 개선하면 스코어가 낮아질 것입니다.`,
                 d => `파5를 활용하지 못하고 있습니다 (평균 +${d.par5AvgOverPar.toFixed(1)}). 더 나은 코스 매니지먼트가 타수를 줄일 수 있습니다.`,
             ],
         }
