@@ -11,7 +11,7 @@ pub struct MobileRoundSummary {
     pub id: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MobileRound {
     pub id: String,
     pub source: String,
@@ -23,14 +23,14 @@ pub struct MobileRound {
     pub heart_rate_timeline: Vec<MobileHeartRateSample>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MobileHeartRateSample {
     pub timestamp: String,
     pub bpm: u32,
     pub altitude_meters: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MobileHoleScore {
     pub number: u8,
     pub par: u8,
@@ -41,7 +41,7 @@ pub struct MobileHoleScore {
     pub green_center: Option<GpsPoint>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MobileShot {
     pub location: GpsPoint,
     pub timestamp: String,

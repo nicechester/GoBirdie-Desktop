@@ -305,6 +305,14 @@ export const STRINGS = {
 
         // Apple sync
         'sync.apple.notfound': 'iPhone not found on network',
+        'sync.apple.searching': 'Searching for iPhone...',
+        'sync.apple.found': 'iPhone found',
+        'sync.apple.connecting': 'Connecting...',
+        'sync.apple.connected': 'Connected',
+        'sync.apple.downloading': 'Downloading {current}/{total}...',
+        'sync.apple.completed': 'Sync complete',
+        'sync.apple.retrying': 'Retrying ({attempt})...',
+        'sync.apple.partial': 'Synced {synced}, {failed} failed',
         'sync.android.label': 'Sync Android',
         'sync.android.syncing': 'Syncing...',
         'sync.android.notfound': 'Android phone not found on network. Enable Sync Server in GoBirdie Settings.',
@@ -596,6 +604,14 @@ export const STRINGS = {
 
         // Apple sync
         'sync.apple.notfound': '네트워크에서 아이폰을 찾을 수 없습니다',
+        'sync.apple.searching': '아이폰 검색 중...',
+        'sync.apple.found': '아이폰 발견',
+        'sync.apple.connecting': '연결 중...',
+        'sync.apple.connected': '연결됨',
+        'sync.apple.downloading': '다운로드 중 {current}/{total}...',
+        'sync.apple.completed': '동기화 완료',
+        'sync.apple.retrying': '재시도 중 ({attempt})...',
+        'sync.apple.partial': '{synced}개 동기화, {failed}개 실패',
         'sync.android.label': '안드로이드 동기화',
         'sync.android.syncing': '동기화 중...',
         'sync.android.notfound': '네트워크에서 안드로이드 폰을 찾을 수 없습니다. GoBirdie 설정에서 동기화 서버를 활성화하세요.',

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
 import { openCoachingModal } from './coaching-panel.js';
 import { t, getLang, setLang } from './i18n.js';
@@ -3415,7 +3416,51 @@ async function handleAppleSync() {
     const btn   = document.getElementById('apple-sync-btn');
     const label = document.getElementById('apple-sync-label');
     btn.disabled = true;
-    label.textContent = t('sync.syncing');
+    label.textContent = t('sync.apple.searching');
+
+    // Listen for sync status events
+    const unlisten = await listen('sync-status', (event) => {
+        const { stage, detail } = event.payload;
+        switch (stage) {
+            case 'SEARCHING':
+                label.textContent = t('sync.apple.searching');
+                break;
+            case 'FOUND':
+                label.textContent = t('sync.apple.found');
+                break;
+            case 'CONNECTING':
+                label.textContent = t('sync.apple.connecting');
+                break;
+            case 'CONNECTED':
+                label.textContent = t('sync.apple.connected');
+                break;
+            case 'DOWNLOADING':
+                if (detail) {
+                    const [current, total] = detail.split('/');
+                    label.textContent = t('sync.apple.downloading', { current, total });
+                } else {
+                    label.textContent = t('sync.syncing');
+                }
+                break;
+            case 'RETRYING':
+                if (detail) {
+                    label.textContent = t('sync.apple.retrying', { attempt: detail });
+                }
+                break;
+            case 'COMPLETED':
+                if (detail && detail.includes(':')) {
+                    const [synced, failed] = detail.split(':');
+                    if (parseInt(failed) > 0) {
+                        label.textContent = t('sync.apple.partial', { synced, failed });
+                    } else {
+                        label.textContent = t('sync.apple.completed');
+                    }
+                } else {
+                    label.textContent = t('sync.apple.completed');
+                }
+                break;
+        }
+    });
 
     try {
         const newSummaries = await syncAppleRounds();
@@ -3431,6 +3476,7 @@ async function handleAppleSync() {
         const msg = String(e).includes('not found') ? t('sync.apple.notfound') : t('toast.syncfail', { err: e });
         toast(msg, true);
     } finally {
+        unlisten();
         state.syncing = false;
         btn.disabled = false;
         label.textContent = t('sync.label');
