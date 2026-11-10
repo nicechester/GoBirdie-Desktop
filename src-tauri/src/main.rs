@@ -20,7 +20,7 @@ use sha2::Digest;
 use serde::{Serialize, Deserialize};
 use models::{GolfRound, RoundSummary, ClubInfo, Settings};
 use store::Store;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 struct AppState {
     store: Mutex<Store>,
@@ -207,11 +207,17 @@ fn delete_round(id: String, state: State<'_, AppState>) -> Result<bool, String> 
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
-    let list = apple_sync::fetch_round_list()?;
+async fn sync_apple_rounds(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<RoundSummary>, String> {
+    // Single connection sync - fetches list + all rounds at once
+    let app_clone = app.clone();
+    let (list, rounds_map) = apple_sync::sync_all_rounds(move |status| {
+        let _ = app_clone.emit("sync-status", &status);
+    })?;
 
     let mut new_summaries = Vec::new();
-    for summary in list {
+
+    for summary in &list {
+        // Check if already exists
         {
             let store = state.store.lock().unwrap();
             if store.contains_id(&summary.id) {
@@ -219,12 +225,23 @@ async fn sync_apple_rounds(state: State<'_, AppState>) -> Result<Vec<RoundSummar
             }
         }
 
-        let full = apple_sync::fetch_round(&summary.id)?;
-        let round = apple_sync::convert_apple_round(full);
-        let rs = RoundSummary::from(&round);
-        state.store.lock().unwrap().save_by_id(&summary.id, &round)?;
-        new_summaries.push(rs);
+        // Get the round data from the map
+        if let Some(full) = rounds_map.get(&summary.id) {
+            let round = apple_sync::convert_apple_round(full.clone());
+            let rs = RoundSummary::from(&round);
+            if let Err(e) = state.store.lock().unwrap().save_by_id(&summary.id, &round) {
+                eprintln!("Failed to save round {}: {}", summary.id, e);
+            } else {
+                new_summaries.push(rs);
+            }
+        }
     }
+
+    // Emit completed
+    let _ = app.emit("sync-status", apple_sync::SyncStatus {
+        stage: "COMPLETED".to_string(),
+        detail: Some(format!("{}", new_summaries.len())),
+    });
 
     Ok(new_summaries)
 }

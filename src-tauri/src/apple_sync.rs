@@ -1,5 +1,9 @@
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader};
+use std::sync::mpsc;
+use std::thread;
+use std::collections::HashMap;
 use crate::mobile_sync::{MobileRound, MobileRoundSummary, convert_mobile_round};
 use crate::models::GolfRound;
 
@@ -8,6 +12,14 @@ pub type AppleRound = MobileRound;
 
 pub fn convert_apple_round(r: AppleRound) -> GolfRound {
     convert_mobile_round(r)
+}
+
+// ── Status events ─────────────────────────────────────────────────────────────
+
+#[derive(Clone, serde::Serialize)]
+pub struct SyncStatus {
+    pub stage: String,
+    pub detail: Option<String>,
 }
 
 // ── Helper binary ─────────────────────────────────────────────────────────────
@@ -26,38 +38,72 @@ fn find_helper() -> Result<PathBuf, String> {
     Err("gobirdie-sync-helper binary not found".into())
 }
 
-fn run_helper(args: &[&str]) -> Result<String, String> {
+// ── Sync result from helper ───────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct SyncResult {
+    list: Vec<AppleRoundSummary>,
+    rounds: HashMap<String, AppleRound>,
+}
+
+// ── Main sync function ────────────────────────────────────────────────────────
+
+/// Sync all rounds from iPhone in a single connection.
+/// Returns (list of summaries, map of id -> full round data)
+pub fn sync_all_rounds<F>(mut on_status: F) -> Result<(Vec<AppleRoundSummary>, HashMap<String, AppleRound>), String>
+where
+    F: FnMut(SyncStatus),
+{
     let binary = find_helper()?;
-    let output = Command::new(&binary)
-        .args(args)
-        .output()
+    let mut child = Command::new(&binary)
+        .arg("sync")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("Failed to run gobirdie-sync-helper: {}", e))?;
 
-    match output.status.code() {
-        Some(0) => {},
-        Some(1) => return Err("iPhone not found on network".into()),
-        Some(3) => return Err("Helper usage error".into()),
-        _ => {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("gobirdie-sync-helper failed: {}", err));
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+
+    // Channel to collect stdout
+    let (tx, rx) = mpsc::channel::<String>();
+
+    // Read stdout in background thread
+    let stdout_handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        let mut output = String::new();
+        for line in reader.lines().map_while(Result::ok) {
+            output.push_str(&line);
+            output.push('\n');
         }
+        let _ = tx.send(output);
+    });
+
+    // Read stderr and emit status events
+    let stderr_reader = BufReader::new(stderr);
+    for line in stderr_reader.lines().map_while(Result::ok) {
+        if line.starts_with("STATUS:") {
+            let parts: Vec<&str> = line.splitn(3, ':').collect();
+            let stage = parts.get(1).unwrap_or(&"").to_string();
+            let detail = parts.get(2).map(|s| s.to_string());
+            on_status(SyncStatus { stage, detail });
+        }
+        eprintln!("[sync-helper] {}", line);
     }
 
-    String::from_utf8(output.stdout)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| format!("Invalid UTF-8 from helper: {}", e))
-}
+    let status = child.wait().map_err(|e| format!("Failed to wait for helper: {}", e))?;
+    stdout_handle.join().map_err(|_| "stdout thread panicked")?;
 
-// ── Fetch via helper ──────────────────────────────────────────────────────────
+    let output = rx.recv().map_err(|_| "Failed to receive stdout")?;
 
-pub fn fetch_round_list() -> Result<Vec<AppleRoundSummary>, String> {
-    let json = run_helper(&["list"])?;
-    serde_json::from_str(&json)
-        .map_err(|e| format!("fetch_round_list decode: {}", e))
-}
-
-pub fn fetch_round(id: &str) -> Result<AppleRound, String> {
-    let json = run_helper(&["round", id])?;
-    serde_json::from_str(&json)
-        .map_err(|e| format!("fetch_round decode: {}", e))
+    match status.code() {
+        Some(0) => {
+            let result: SyncResult = serde_json::from_str(output.trim())
+                .map_err(|e| format!("Failed to parse sync result: {}", e))?;
+            Ok((result.list, result.rounds))
+        }
+        Some(1) => Err("iPhone not found on network".into()),
+        Some(3) => Err("Helper usage error".into()),
+        _ => Err("gobirdie-sync-helper failed".into()),
+    }
 }
