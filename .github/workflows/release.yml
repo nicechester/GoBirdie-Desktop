@@ -70,14 +70,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build Tauri app
-        run: npm run tauri:build
+      - name: Build Tauri app (skip DMG)
+        run: npm run build && npx tauri build --bundles app
         env:
           CI: false
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
-      - name: Bundle dylibs and repackage DMG
+      - name: Bundle dylibs and create DMG
         run: bash bundle_dylibs.sh
 
       - name: Upload Release Assets

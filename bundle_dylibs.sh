@@ -29,12 +29,14 @@ install_name_tool \
   -change "${LIBUSB_ORIG}" "@executable_path/../Frameworks/libusb-1.0.0.dylib" \
   "${FRAMEWORKS}/libmtp.9.dylib"
 
-echo "==> Repackaging DMG..."
+echo "==> Creating DMG..."
 APP_NAME="$(basename "${APP_BUNDLE}" .app)"
+VERSION="$(grep '"version"' src-tauri/tauri.conf.json | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')"
+ARCH="$(uname -m)"
 DMG_DIR="src-tauri/target/release/bundle/dmg"
-DMG_OUT="${DMG_DIR}/${APP_NAME}.dmg"
+DMG_OUT="${DMG_DIR}/${APP_NAME}_${VERSION}_${ARCH}.dmg"
 
-# Remove old DMG and create a fresh one
+mkdir -p "${DMG_DIR}"
 rm -f "${DMG_OUT}"
 hdiutil create \
   -volname "${APP_NAME}" \
