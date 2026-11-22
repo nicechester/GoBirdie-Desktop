@@ -114,6 +114,33 @@ impl Store {
         Ok(false)
     }
 
+    /// Find a round by id (scanning all entries, so the storage key does not matter),
+    /// apply `f` to it, and write it back under the same key.
+    /// Returns the updated round, or `None` if no round has that id.
+    pub fn update_round(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut GolfRound) -> Result<(), String>,
+    ) -> Result<Option<GolfRound>, String> {
+        for item in self.db.iter() {
+            if let Ok((key, val)) = item {
+                if let Ok(mut r) = serde_json::from_slice::<GolfRound>(&val) {
+                    if r.id == id {
+                        f(&mut r)?;
+                        let json = serde_json::to_vec(&r)
+                            .map_err(|e| format!("Serialize round error: {}", e))?;
+                        self.db.insert(&key, json)
+                            .map_err(|e| format!("Update error: {}", e))?;
+                        self.db.flush()
+                            .map_err(|e| format!("Flush error: {}", e))?;
+                        return Ok(Some(r));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn load_settings(&self) -> Option<Settings> {
         self.db.get(SETTINGS_KEY).ok().flatten().and_then(|bytes| {
             serde_json::from_slice(&bytes).ok()

@@ -79,6 +79,10 @@ async function deleteRound(id) {
     return invoke('delete_round', { id });
 }
 
+async function updateRoundHoles(id, holes) {
+    return invoke('update_round_holes', { id, holes });
+}
+
 // ── UI helpers ───────────────────────────────────────────────────────────────
 
 function toast(msg, isError = false) {
@@ -243,6 +247,7 @@ function confirmDeleteRound(roundId) {
 // ── Round detail ─────────────────────────────────────────────────────────────
 
 async function loadDetail(id) {
+    if (!(await confirmLeaveShotMapEdit())) return;
     state.activeView = 'detail';
 
     // If same round, just switch tab rendering — no re-fetch
@@ -344,8 +349,9 @@ function renderDetailTabs() {
 
     // Wire tab buttons — no re-fetch, just re-render
     content.querySelectorAll('.detail-tab').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             if (state.activeTab === btn.dataset.tab) return;
+            if (!(await confirmLeaveShotMapEdit())) return;
             state.activeTab = btn.dataset.tab;
             renderDetailTabs();
         });
@@ -954,6 +960,10 @@ function buildShotMap(round) {
                     ${holeButtons}
                 </div>
             </div>
+            <div class="flex items-center gap-3 mt-3 min-h-[28px]">
+                <div id="shot-hole-summary" class="hidden text-sm font-medium text-gray-700"></div>
+                <button id="shot-edit-btn" class="hidden ml-auto px-3 py-1 text-xs rounded-full border border-gray-300"></button>
+            </div>
         </div>
 
         <!-- Map and Timeline split layout -->
@@ -963,6 +973,7 @@ function buildShotMap(round) {
                 <div id="shot-map-wrapper" class="flex-1 mb-3">
                     <div id="shot-map"></div>
                 </div>
+                <div id="shot-edit-bar" class="hidden mb-3 p-3 rounded-lg bg-gray-50 border text-xs text-gray-600"></div>
                 <div class="flex items-center justify-between pt-3 border-t">
                     <div id="shot-legend" class="flex flex-wrap gap-3 text-xs text-gray-500"></div>
                     <button id="trail-toggle" class="px-3 py-1 text-xs rounded-full border border-gray-300
@@ -982,6 +993,638 @@ function buildShotMap(round) {
             </div>
         </div>
     </div>`;
+}
+
+// ── Shot Map: hole score + edit mode ─────────────────────────────────────────
+
+// UI state for the Shot Map tab. `edit` is non-null only while one hole is being edited.
+const shotMapUi = {
+    hole: 'all',        // selected hole filter: 'all' or a hole number as a string
+    edit: null,         // { holeNumber, original, draft, green, selectedId, pendingId, dirty, markers, onMapClick }
+    restoreHole: null,  // hole to re-select after a save re-renders the tab
+    layerIds: null,     // { holeLayers, holeLabelLayers } from the current renderShotMap()
+};
+let shotMapIdSeq = 0;
+let suppressMapClickUntil = 0;   // ignore the synthetic click that follows a marker drag
+
+// Club abbreviation for a shot (e.g. "7i", "3W", "Dr", "P")
+function clubAbbr(shot) {
+    const name = shot.club_name ?? '';
+    const cat  = shot.club_category ?? '';
+    if (cat === 'putt') return 'P';
+    if (!name) return cat.slice(0,1).toUpperCase();
+    const m = name.match(/^(\d+)[-\s]?(Wood|Iron|Hybrid)/i);
+    if (m) {
+        const t = m[2].toLowerCase();
+        if (t === 'iron') return m[1] + 'i';
+        if (t === 'hybrid') return m[1] + 'H';
+        return m[1] + 'W';
+    }
+    if (name.length <= 3) return name;
+    if (name === 'Driver') return 'Dr';
+    if (name === 'Hybrid') return 'H';
+    return name.slice(0, 2);
+}
+
+// Clubs offered in the picker (CLUB_ORDER is declared later in the file, so read it lazily)
+function editClubList() {
+    return CLUB_ORDER.filter(c => c !== 'unknown');
+}
+
+// Map a club name to the shot category used by CLUB_COLORS and the scorecard
+function clubCategoryFor(name) {
+    if (name === 'Driver') return 'tee';
+    if (name === 'Putter') return 'putt';
+    if (/Wood$/.test(name) || name === 'Hybrid') return 'fairway_wood';
+    if (/Iron$/.test(name)) return 'iron';
+    if (/^(PW|GW|SW|LW)$/.test(name)) return 'wedge';
+    return 'unknown';
+}
+
+// Club id from the round's club list (0 when the club is not in it)
+function clubIdFor(name) {
+    const c = state.activeRound?.clubs?.find(c => c.name === name);
+    return c ? c.club_id : 0;
+}
+
+// Strokes for a hole = non-putt shots + putts (matches the iOS editor)
+function recalcScore(hs) {
+    return hs.shots.filter(s => s.club_category !== 'putt').length + hs.putts;
+}
+
+// Single source of truth for from/to chaining. Each shot ends where the next begins;
+// the last shot ends on the green, which is fixed when editing starts.
+function rechain(e) {
+    const shots = e.draft.shots;
+    shots.forEach((s, i) => {
+        s.to = i < shots.length - 1 ? { ...shots[i + 1].from } : { ...e.green };
+        s.distance_meters = distMeters(s.from, s.to);
+        delete s.lie_angle;
+        delete s.elevation_gain;
+    });
+    e.draft.score = recalcScore(e.draft);
+}
+
+// Insert a new shot ordered by distance to the green (descending), as the iOS editor does
+function insertShotByDistance(e, pt) {
+    const d = distMeters(pt, e.green);
+    let idx = e.draft.shots.findIndex(s => distMeters(s.from, e.green) < d);
+    if (idx < 0) idx = e.draft.shots.length;
+    const id = ++shotMapIdSeq;
+    e.draft.shots.splice(idx, 0, {
+        _id: id,
+        from: { ...pt },
+        to: { ...pt },
+        club_id: 0,
+        club_name: null,
+        club_category: 'unknown',
+        distance_meters: null,
+        heart_rate: null,
+        altitude_meters: null,
+        swing_tempo: null,
+        timestamp: null,
+    });
+    return id;
+}
+
+// Strip client-only fields and send only the model fields to Rust
+function hsToClean(hs) {
+    return {
+        hole_number: hs.hole_number,
+        score: hs.score,
+        putts: hs.putts,
+        fairway_hit: !!hs.fairway_hit,
+        shots: hs.shots.map(s => ({
+            from: { lat: s.from.lat, lon: s.from.lon },
+            to:   { lat: s.to.lat,   lon: s.to.lon },
+            club_id: s.club_id ?? 0,
+            club_name: s.club_name ?? null,
+            club_category: s.club_category ?? null,
+            distance_meters: s.distance_meters ?? null,
+            heart_rate: s.heart_rate ?? null,
+            altitude_meters: s.altitude_meters ?? null,
+            swing_tempo: s.swing_tempo ?? null,
+            timestamp: s.timestamp ?? null,
+        })),
+    };
+}
+
+function shotsLabel(n) {
+    return t(n === 1 ? 'shotmap.shotsOne' : 'shotmap.shotsMany', { n });
+}
+
+// Header summary for the selected hole: "Hole 7 · Par 4 · 5 shots" (live while editing)
+function updateHoleSummary() {
+    const el = document.getElementById('shot-hole-summary');
+    if (!el) return;
+    const hole = shotMapUi.hole;
+    const round = state.activeRound;
+    const hs = hole === 'all' ? null
+        : (shotMapUi.edit?.draft ?? round?.scorecard?.hole_scores?.find(h => String(h.hole_number) === hole));
+    if (!hs) {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    const par = round?.scorecard?.hole_definitions?.find(h => String(h.hole_number) === hole)?.par;
+    const shots = hs.score > 0 ? hs.score : hs.shots.length + hs.putts;
+    el.textContent = par
+        ? t('shotmap.holeSummary', { hole, par, shots: shotsLabel(shots) })
+        : t('shotmap.holeSummaryNoPar', { hole, shots: shotsLabel(shots) });
+    el.classList.remove('hidden');
+}
+
+function updateEditButton() {
+    const btn = document.getElementById('shot-edit-btn');
+    if (!btn) return;
+    const hole = shotMapUi.hole;
+    const editing = !!shotMapUi.edit;
+    const hs = hole === 'all' ? null
+        : state.activeRound?.scorecard?.hole_scores?.find(h => String(h.hole_number) === hole);
+    const hasShots = !!hs?.shots?.length;
+    btn.classList.toggle('hidden', hole === 'all');
+    btn.disabled = !editing && !hasShots;
+    btn.title = hasShots || editing ? '' : t('shotmap.edit.noShots');
+    btn.textContent = editing ? t('shotmap.done') : t('shotmap.edit');
+    btn.className = `ml-auto px-3 py-1 text-xs rounded-full border transition disabled:opacity-40 disabled:cursor-not-allowed ${
+        editing ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-50'}`;
+    if (hole === 'all') btn.classList.add('hidden');
+}
+
+// Called by the hole buttons after they change the visible layers
+function onShotMapHoleSelected(hole) {
+    shotMapUi.hole = hole;
+    updateHoleSummary();
+    updateEditButton();
+}
+
+// Show the per-hole layers for `hole` ('all' shows the combined layers), as the hole buttons do
+function applyHoleVisibility(hole) {
+    const L = shotMapUi.layerIds;
+    console.log('[shotmap] applyHoleVisibility', hole, 'hasLayers', !!L);
+    if (!activeMap || !L) return;
+    const all = hole === 'all';
+    const setVis = (id, vis) => { if (activeMap.getLayer(id)) activeMap.setLayoutProperty(id, 'visibility', vis ? 'visible' : 'none'); };
+    [L.holeLayers, L.holeLabelLayers].forEach(group =>
+        Object.entries(group).forEach(([n, ids]) => ids.forEach(id => setVis(id, !all && n === hole))));
+    setVis('all-shots', all);
+    setVis('putt-labels', !all);
+}
+
+function hideAllShotLayers() {
+    const L = shotMapUi.layerIds;
+    if (!activeMap || !L) return;
+    [L.holeLayers, L.holeLabelLayers].forEach(group =>
+        Object.values(group).forEach(ids => ids.forEach(id => {
+            if (activeMap.getLayer(id)) activeMap.setLayoutProperty(id, 'visibility', 'none');
+        })));
+    ['all-shots', 'putt-labels'].forEach(id => {
+        if (activeMap.getLayer(id)) activeMap.setLayoutProperty(id, 'visibility', 'none');
+    });
+}
+
+// Simple modal; returns { el, close }. A click on the backdrop reports the element itself as target.
+function openModal(innerHtml) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:60;';
+    wrap.innerHTML = `<div class="bg-white rounded-xl shadow-xl p-5 w-96 max-w-[90vw] max-h-[80vh] overflow-auto">${innerHtml}</div>`;
+    document.body.appendChild(wrap);
+    return { el: wrap, close: () => wrap.remove() };
+}
+
+// Yes/No-style prompt. Resolves to the chosen key, or null when dismissed.
+function askChoice(message, options) {
+    return new Promise(resolve => {
+        const btns = options.map(o => `<button data-key="${o.key}" class="px-3 py-1.5 text-xs rounded-lg ${
+            o.primary ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'}">${o.label}</button>`).join('');
+        const m = openModal(`<p class="text-sm text-gray-700 mb-4">${message}</p><div class="flex justify-end gap-2">${btns}</div>`);
+        m.el.addEventListener('click', ev => {
+            if (ev.target === m.el) { m.close(); resolve(null); return; }
+            const b = ev.target.closest('button[data-key]');
+            if (!b) return;
+            m.close();
+            resolve(b.dataset.key);
+        });
+    });
+}
+
+// Club picker. Resolves to the club name, or null when cancelled.
+function pickClub(current, title) {
+    return new Promise(resolve => {
+        const btns = editClubList().map(c => `<button data-club="${c}" class="px-2 py-2 text-xs rounded border ${
+            c === current ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}">${c}</button>`).join('');
+        const m = openModal(`
+            <h4 class="font-semibold text-gray-700 mb-3">${title}</h4>
+            <div class="grid grid-cols-3 gap-2">${btns}</div>
+            <div class="flex justify-end mt-4">
+                <button data-cancel="1" class="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">${t('shotmap.edit.cancel')}</button>
+            </div>`);
+        m.el.addEventListener('click', ev => {
+            if (ev.target === m.el) { m.close(); resolve(null); return; }
+            const b = ev.target.closest('button');
+            if (!b) return;
+            m.close();
+            resolve(b.dataset.club ?? null);
+        });
+    });
+}
+
+// Reorder sheet with up/down buttons. Applies the new order to the draft on Apply.
+function openReorderSheet() {
+    const e = shotMapUi.edit;
+    if (!e) return;
+    const order = [...e.draft.shots];
+    const m = openModal(`
+        <h4 class="font-semibold text-gray-700 mb-3">${t('shotmap.edit.reorderTitle')}</h4>
+        <div data-list></div>
+        <div class="flex justify-end gap-2 mt-4">
+            <button data-cancel="1" class="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">${t('shotmap.edit.cancel')}</button>
+            <button data-apply="1" class="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white">${t('shotmap.edit.apply')}</button>
+        </div>`);
+    const list = m.el.querySelector('[data-list]');
+    const renderList = () => {
+        list.innerHTML = order.map((s, i) => `
+            <div class="flex items-center gap-2 py-1.5 border-b text-sm">
+                <span class="w-6 text-gray-400">${i + 1}</span>
+                <span class="flex-1">${clubAbbr(s)} · ${s.club_name ?? '—'}</span>
+                <button data-up="${i}" ${i === 0 ? 'disabled' : ''} class="px-2 py-0.5 border rounded disabled:opacity-30">▲</button>
+                <button data-down="${i}" ${i === order.length - 1 ? 'disabled' : ''} class="px-2 py-0.5 border rounded disabled:opacity-30">▼</button>
+            </div>`).join('');
+    };
+    renderList();
+    m.el.addEventListener('click', ev => {
+        const up = ev.target.closest('[data-up]');
+        const down = ev.target.closest('[data-down]');
+        if (up || down) {
+            const i = Number((up ?? down).dataset[up ? 'up' : 'down']);
+            const j = up ? i - 1 : i + 1;
+            [order[i], order[j]] = [order[j], order[i]];
+            renderList();
+            return;
+        }
+        if (ev.target === m.el || ev.target.closest('[data-cancel]')) { m.close(); return; }
+        if (ev.target.closest('[data-apply]')) {
+            m.close();
+            if (shotMapUi.edit !== e) return;
+            e.draft.shots = order;
+            e.dirty = true;
+            rechain(e);
+            buildEditMarkers();
+            refreshEditLayer();
+            renderEditBar();
+            updateHoleSummary();
+        }
+    });
+}
+
+// Marker-driven selection, drawing and club changes for the hole being edited
+function refreshEditLayer() {
+    const e = shotMapUi.edit;
+    if (!e || !activeMap) return;
+    const lines = [], labels = [];
+    e.draft.shots.forEach(s => {
+        const color = CLUB_COLORS[s.club_category] ?? CLUB_COLORS.unknown;
+        lines.push({
+            type: 'Feature',
+            properties: { color },
+            geometry: { type: 'LineString', coordinates: [[s.from.lon, s.from.lat], [s.to.lon, s.to.lat]] },
+        });
+        if (s.distance_meters != null) {
+            labels.push({
+                type: 'Feature',
+                properties: { label: `${Math.round(metersToYards(s.distance_meters))}y` },
+                geometry: { type: 'Point', coordinates: [(s.from.lon + s.to.lon) / 2, (s.from.lat + s.to.lat) / 2] },
+            });
+        }
+    });
+    activeMap.getSource('edit-lines')?.setData({ type: 'FeatureCollection', features: lines });
+    activeMap.getSource('edit-dist')?.setData({ type: 'FeatureCollection', features: labels });
+}
+
+function updateMarkerStyles() {
+    const e = shotMapUi.edit;
+    if (!e) return;
+    e.draft.shots.forEach(s => {
+        const m = e.markers.get(s._id);
+        if (!m) return;
+        const sel = s._id === e.selectedId;
+        m.el.textContent = clubAbbr(s);
+        m.el.style.background = CLUB_COLORS[s.club_category] ?? CLUB_COLORS.unknown;
+        m.el.style.transform = sel ? 'scale(1.3)' : 'scale(1)';
+        m.el.style.boxShadow = sel ? '0 0 0 3px #facc15, 0 1px 3px rgba(0,0,0,.4)' : '0 1px 3px rgba(0,0,0,.4)';
+        m.el.style.zIndex = sel ? '2' : '1';
+    });
+}
+
+function buildEditMarkers() {
+    const e = shotMapUi.edit;
+    if (!e || !activeMap) return;
+    e.markers.forEach(({ marker }) => marker.remove());
+    e.markers.clear();
+    e.draft.shots.forEach(s => {
+        // MapLibre positions the element passed to Marker by setting its transform, so the
+        // root must not be restyled with transform. The visible dot is an inner child.
+        const root = document.createElement('div');
+        root.className = 'shot-edit-marker';
+        root.style.cssText = 'width:26px;height:26px;cursor:grab;';
+        const el = document.createElement('div');
+        el.style.cssText = 'width:26px;height:26px;box-sizing:border-box;border-radius:50%;border:2px solid #fff;'
+            + 'color:#fff;font:700 10px/22px sans-serif;text-align:center;user-select:none;'
+            + 'box-shadow:0 1px 3px rgba(0,0,0,.4);';
+        root.appendChild(el);
+        root.addEventListener('click', ev => {
+            ev.stopPropagation();
+            if (Date.now() < suppressMapClickUntil) return;
+            if (shotMapUi.edit?.selectedId === s._id) {
+                openEditClubPicker(s._id);
+            } else {
+                selectShot(s._id);
+            }
+        });
+        const marker = new maplibregl.Marker({ element: root, draggable: true })
+            .setLngLat([s.from.lon, s.from.lat])
+            .addTo(activeMap);
+        marker.on('dragstart', () => { activeMap.dragPan.disable(); });
+        marker.on('drag', () => {
+            const ll = marker.getLngLat();
+            s.from = { lat: ll.lat, lon: ll.lng };
+            e.dirty = true;
+            rechain(e);
+            refreshEditLayer();
+        });
+        marker.on('dragend', () => {
+            activeMap.dragPan.enable();
+            suppressMapClickUntil = Date.now() + 250;
+            selectShot(s._id);
+        });
+        e.markers.set(s._id, { marker, el });
+    });
+    updateMarkerStyles();
+}
+
+function selectShot(id) {
+    const e = shotMapUi.edit;
+    if (!e) return;
+    e.selectedId = id;
+    updateMarkerStyles();
+    renderEditBar();
+}
+
+// Tapping an empty spot on the map stages a new shot and opens the club picker
+function onEditMapClick(ev) {
+    const e = shotMapUi.edit;
+    if (!e || e.pendingId) return;
+    if (Date.now() < suppressMapClickUntil) return;
+    if (ev.originalEvent?.target?.closest?.('.shot-edit-marker')) return;
+    const id = insertShotByDistance(e, { lat: ev.lngLat.lat, lon: ev.lngLat.lng });
+    e.pendingId = id;
+    e.selectedId = id;
+    rechain(e);
+    buildEditMarkers();
+    refreshEditLayer();
+    renderEditBar();
+    updateHoleSummary();
+    openEditClubPicker(id);
+}
+
+function cancelPendingShot(e) {
+    e.draft.shots = e.draft.shots.filter(s => s._id !== e.pendingId);
+    e.pendingId = null;
+    e.selectedId = null;
+    rechain(e);
+    buildEditMarkers();
+    refreshEditLayer();
+    renderEditBar();
+    updateHoleSummary();
+}
+
+function applyClub(e, id, name) {
+    const s = e.draft.shots.find(x => x._id === id);
+    if (!s) return;
+    s.club_name = name;
+    s.club_category = clubCategoryFor(name);
+    s.club_id = clubIdFor(name);
+    if (e.pendingId === id) e.pendingId = null;
+    e.dirty = true;
+    rechain(e);
+    refreshEditLayer();
+    updateMarkerStyles();
+    renderEditBar();
+    updateHoleSummary();
+}
+
+async function openEditClubPicker(shotId) {
+    const e = shotMapUi.edit;
+    if (!e || !shotId) return;
+    const s = e.draft.shots.find(x => x._id === shotId);
+    if (!s) return;
+    const pending = e.pendingId === shotId;
+    const picked = await pickClub(s.club_name,
+        t(pending ? 'shotmap.edit.selectClub' : 'shotmap.edit.changeClub'));
+    if (shotMapUi.edit !== e) return;
+    if (picked) applyClub(e, shotId, picked);
+    else if (pending) cancelPendingShot(e);
+}
+
+async function deleteSelectedShot() {
+    const e = shotMapUi.edit;
+    if (!e || !e.selectedId) return;
+    const ok = await askChoice(t('shotmap.edit.deleteConfirm'), [
+        { key: 'no', label: t('shotmap.edit.no') },
+        { key: 'yes', label: t('shotmap.edit.yes'), primary: true },
+    ]);
+    if (ok !== 'yes' || shotMapUi.edit !== e) return;
+    e.draft.shots = e.draft.shots.filter(s => s._id !== e.selectedId);
+    e.selectedId = null;
+    e.dirty = true;
+    rechain(e);
+    buildEditMarkers();
+    refreshEditLayer();
+    renderEditBar();
+    updateHoleSummary();
+}
+
+function adjustPutts(delta) {
+    const e = shotMapUi.edit;
+    if (!e) return;
+    e.draft.putts = Math.max(0, e.draft.putts + delta);
+    e.dirty = true;
+    rechain(e);
+    renderEditBar();
+    updateHoleSummary();
+}
+
+function renderEditBar() {
+    const bar = document.getElementById('shot-edit-bar');
+    if (!bar) return;
+    const e = shotMapUi.edit;
+    if (!e) {
+        bar.classList.add('hidden');
+        bar.innerHTML = '';
+        return;
+    }
+    const hasSel = e.draft.shots.some(s => s._id === e.selectedId);
+    const hint = hasSel
+        ? t('shotmap.edit.dragToMove')
+        : `${t('shotmap.edit.hintAdd')} · ${t('shotmap.edit.hintSelect')}`;
+    bar.innerHTML = `
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span>${hint}</span>
+            <div class="flex items-center gap-2 flex-wrap">
+                ${hasSel ? `
+                <button data-act="club" class="px-2.5 py-1 rounded border border-gray-300 hover:bg-gray-50">${t('shotmap.edit.changeClub')}</button>
+                <button data-act="delete" class="px-2.5 py-1 rounded bg-red-600 text-white">${t('shotmap.edit.deleteShot')}</button>` : ''}
+                ${e.draft.shots.length > 1 ? `<button data-act="reorder" class="px-2.5 py-1 rounded border border-gray-300 hover:bg-gray-50">${t('shotmap.edit.reorder')}</button>` : ''}
+                <span class="flex items-center gap-1 ml-1">
+                    <span>${t('shotmap.edit.putts')}</span>
+                    <button data-act="putt-" class="px-2 rounded border border-gray-300 hover:bg-gray-50">−</button>
+                    <span class="w-5 text-center font-medium">${e.draft.putts}</span>
+                    <button data-act="putt+" class="px-2 rounded border border-gray-300 hover:bg-gray-50">+</button>
+                </span>
+            </div>
+        </div>`;
+    bar.classList.remove('hidden');
+}
+
+function onEditBarClick(ev) {
+    const b = ev.target.closest('button[data-act]');
+    if (!b) return;
+    switch (b.dataset.act) {
+        case 'club':   openEditClubPicker(shotMapUi.edit?.selectedId); break;
+        case 'delete': deleteSelectedShot(); break;
+        case 'reorder': openReorderSheet(); break;
+        case 'putt-':  adjustPutts(-1); break;
+        case 'putt+':  adjustPutts(1); break;
+    }
+}
+
+function enterEditMode() {
+    const round = state.activeRound;
+    const hole = shotMapUi.hole;
+    if (!round || !activeMap || shotMapUi.edit || hole === 'all') return;
+    const src = round.scorecard?.hole_scores?.find(h => String(h.hole_number) === hole);
+    if (!src?.shots?.length) return;
+
+    const original = structuredClone(src);
+    const draft = structuredClone(src);
+    draft.shots.forEach(s => { s._id = ++shotMapIdSeq; });
+    const green = { ...src.shots[src.shots.length - 1].to };
+    const e = {
+        holeNumber: src.hole_number, original, draft, green,
+        selectedId: null, pendingId: null, dirty: false,
+        markers: new Map(), onMapClick: null,
+    };
+    shotMapUi.edit = e;
+
+    hideAllShotLayers();
+    activeMap.addSource('edit-lines', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    activeMap.addSource('edit-dist', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    activeMap.addLayer({
+        id: 'edit-line-layer', type: 'line', source: 'edit-lines',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['get', 'color'], 'line-width': 3 },
+    });
+    activeMap.addLayer({
+        id: 'edit-dist-layer', type: 'symbol', source: 'edit-dist',
+        layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-offset': [0, 1.5], 'text-allow-overlap': true },
+        paint: { 'text-color': '#111827', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+    });
+    e.onMapClick = onEditMapClick;
+    activeMap.on('click', e.onMapClick);
+
+    buildEditMarkers();
+    refreshEditLayer();
+    // MapLibre's grab/pan cursor classes would win over a plain style, so force it inline
+    activeMap.getCanvasContainer().style.setProperty('cursor', 'crosshair', 'important');
+    activeMap.getCanvas().style.setProperty('cursor', 'crosshair', 'important');
+    document.querySelectorAll('.hole-btn').forEach(b => { b.disabled = true; b.classList.add('opacity-40'); });
+    const bar = document.getElementById('shot-edit-bar');
+    if (bar) bar.onclick = onEditBarClick;
+    renderEditBar();
+    updateHoleSummary();
+    updateEditButton();
+}
+
+// Leave edit mode without saving. The draft is dropped and the hole's normal layers return.
+function exitEdit() {
+    const e = shotMapUi.edit;
+    console.log('[shotmap] exitEdit', { hole: e?.holeNumber, dirty: e?.dirty });
+    if (!e) return;
+    e.markers.forEach(({ marker }) => marker.remove());
+    e.markers.clear();
+    if (activeMap) {
+        if (e.onMapClick) activeMap.off('click', e.onMapClick);
+        activeMap.dragPan?.enable();
+        ['edit-line-layer', 'edit-dist-layer'].forEach(id => { if (activeMap.getLayer(id)) activeMap.removeLayer(id); });
+        ['edit-lines', 'edit-dist'].forEach(id => { if (activeMap.getSource(id)) activeMap.removeSource(id); });
+        activeMap.getCanvasContainer().style.removeProperty('cursor');
+        activeMap.getCanvas().style.removeProperty('cursor');
+    }
+    shotMapUi.edit = null;
+    const bar = document.getElementById('shot-edit-bar');
+    if (bar) { bar.classList.add('hidden'); bar.innerHTML = ''; bar.onclick = null; }
+    document.querySelectorAll('.hole-btn').forEach(b => { b.disabled = false; b.classList.remove('opacity-40'); });
+    applyHoleVisibility(shotMapUi.hole);
+    updateEditButton();
+    updateHoleSummary();
+}
+
+// Persist the draft hole through Rust, then reload the round, scorecard and round list.
+// Returns true on success. Keeps the draft on failure.
+async function saveEdits({ rerender = true } = {}) {
+    const e = shotMapUi.edit;
+    const round = state.activeRound;
+    if (!e || !round) return false;
+    try {
+        const payload = hsToClean(e.draft);
+        console.log('[shotmap] saving hole', payload.hole_number, 'shots', payload.shots.length, payload.shots.map(x => x.club_name));
+        const updated = await updateRoundHoles(round.id, [payload]);
+        console.log('[shotmap] saved; returned shots for hole', e.holeNumber, updated.scorecard?.hole_scores?.find(h => h.hole_number === e.holeNumber)?.shots.map(x => x.club_name));
+        updated._patterns = round._patterns;
+        updated._feedback = round._feedback;
+        state.activeRound = updated;
+        delete elevationGainCache[round.id];
+        exitEdit();
+        getAllRounds()
+            .then(rounds => { state.rounds = rounds; renderRoundsList(); updateStats(); })
+            .catch(err => console.error('[saveEdits] round list refresh failed:', err));
+        shotMapUi.restoreHole = rerender ? String(e.holeNumber) : null;
+        if (rerender) renderDetailTabs();
+        return true;
+    } catch (err) {
+        toast(t('shotmap.edit.saveFailed', { error: err }), true);
+        return false;
+    }
+}
+
+// Done button: ask to save or discard if there are changes
+async function finishEdit() {
+    const e = shotMapUi.edit;
+    if (!e) return;
+    if (!e.dirty) { exitEdit(); return; }
+    const choice = await askChoice(t('shotmap.edit.saveConfirm'), [
+        { key: 'cancel', label: t('shotmap.edit.cancel') },
+        { key: 'no', label: t('shotmap.edit.no') },
+        { key: 'yes', label: t('shotmap.edit.yes'), primary: true },
+    ]);
+    if (choice === 'yes') await saveEdits();
+    else if (choice === 'no') exitEdit();
+}
+
+// Before leaving the Shot Map (tab, round or view change), settle any open edit.
+// Resolves to true when the caller may continue.
+async function confirmLeaveShotMapEdit({ rerender = false } = {}) {
+    const e = shotMapUi.edit;
+    if (!e) return true;
+    if (!e.dirty) { exitEdit(); return true; }
+    const choice = await askChoice(t('shotmap.edit.saveConfirm'), [
+        { key: 'cancel', label: t('shotmap.edit.cancel') },
+        { key: 'no', label: t('shotmap.edit.no') },
+        { key: 'yes', label: t('shotmap.edit.yes'), primary: true },
+    ]);
+    if (choice === 'yes') return saveEdits({ rerender });
+    if (choice === 'no') { exitEdit(); return true; }
+    return false;
 }
 
 // Mini HR sparkline for shot popups — shows ±5 min of HR around the shot timestamp
@@ -1226,6 +1869,18 @@ async function renderShotMap(round) {
     const mapEl = document.getElementById('shot-map');
     if (!mapEl) return;
 
+    console.log('[shotmap] render start', { hole: shotMapUi.hole, restoreHole: shotMapUi.restoreHole, editing: !!shotMapUi.edit, roundId: round?.id });
+    if (shotMapUi.edit) exitEdit();
+    shotMapUi.layerIds = null;
+    shotMapUi.hole = 'all';
+    // A save re-renders this tab; re-select the hole that was being edited
+    const restoreHole = shotMapUi.restoreHole;
+    shotMapUi.restoreHole = null;
+    document.getElementById('shot-edit-btn')?.addEventListener('click', () => {
+        if (shotMapUi.edit) finishEdit();
+        else enterEditMode();
+    });
+
     const sc = round.scorecard;
     if (!sc?.hole_scores?.length) {
         mapEl.innerHTML = `<p class="text-gray-400 text-sm text-center py-8">${t('shotmap.nodata')}</p>`;
@@ -1304,6 +1959,7 @@ async function renderShotMap(round) {
         attributionControl: false
     });
 
+    activeMap.on('error', e => console.error('[shotmap] map error', e?.error?.message ?? e));
     // Resize map on container resize
     const resizeObserver = new ResizeObserver(() => activeMap?.resize?.());
     resizeObserver.observe(document.getElementById('shot-map-wrapper'));
@@ -1316,6 +1972,7 @@ async function renderShotMap(round) {
         holeLayers[hs.hole_number] = [];
         holeLabelLayers[hs.hole_number] = [];
     });
+    shotMapUi.layerIds = { holeLayers, holeLabelLayers };
 
     // All source/layer creation and interactions happen after map loads
     activeMap.on('load', () => {
@@ -1325,25 +1982,6 @@ async function renderShotMap(round) {
         console.log('Map loaded, building shot visualizations. allShots count:', allShots.length);
         activeMap.fitBounds(bounds, { padding: 70, duration: 0 });
         console.log('fitBounds completed, now building features');
-
-        // Club abbreviation helper
-    function clubAbbr(shot) {
-        const name = shot.club_name ?? '';
-        const cat  = shot.club_category ?? '';
-        if (cat === 'putt') return 'P';
-        if (!name) return cat.slice(0,1).toUpperCase();
-        const m = name.match(/^(\d+)[-\s]?(Wood|Iron|Hybrid)/i);
-        if (m) {
-            const t = m[2].toLowerCase();
-            if (t === 'iron') return m[1] + 'i';
-            if (t === 'hybrid') return m[1] + 'H';
-            return m[1] + 'W';
-        }
-        if (name.length <= 3) return name;
-        if (name === 'Driver') return 'Dr';
-        if (name === 'Hybrid') return 'H';
-        return name.slice(0, 2);
-    }
 
     // Draw shots — build Maplibre sources and layers
     const holePutts = {};
@@ -1387,8 +2025,10 @@ async function renderShotMap(round) {
         });
     }
 
+    let featureIdx = -1;
     try {
         allShots.forEach((shot, idx) => {
+            featureIdx = idx;
             if (idx === 0) console.log('Processing first shot...');
             const hole = String(shot.hole_number);
             const cat = shot.club_category ?? 'unknown';
@@ -1540,8 +2180,9 @@ async function renderShotMap(round) {
             }
         });
     } catch (err) {
-        console.error('Error building shot features:', err.message, err.stack);
+        console.error('[shotmap] Error building shot features at index', featureIdx, 'shot =', JSON.stringify(allShots[featureIdx]), err.message, err.stack);
     }
+    console.log('[shotmap] features built', { shots: allShots.length, featureIdx, holes: Object.keys(shotLines).map(h => ({ hole: h, lines: shotLines[h].length, origins: shotOrigins[h].length, labels: shotLabels[h].length })) });
 
     console.log('Feature building complete. shotLines holes:', Object.keys(shotLines), 'total allShots:', allShots.length);
 
@@ -1590,6 +2231,7 @@ async function renderShotMap(round) {
 
 
         // Club abbreviation labels (centered on shot circles)
+        console.log('[shotmap] layers hole', hole, 'labelFeatures', shotLabels[hole]?.length ?? 0, 'originFeatures', shotOrigins[hole]?.length ?? 0);
         if (shotLabels[hole]?.length) {
             const clubLabels = shotLabels[hole].filter(f => !/^\d+y$/.test(f.properties.label));
             if (clubLabels.length) {
@@ -1874,6 +2516,9 @@ async function renderShotMap(round) {
 
             // Zoom timeline chart to hole time window
             zoomTimeline(holeFilter);
+
+            onShotMapHoleSelected(holeFilter);
+            console.log('[shotmap] select hole', holeFilter, 'club-label visibility', Object.entries(holeLabelLayers).map(([h, ids]) => [h, ids.map(id => activeMap.getLayoutProperty(id, 'visibility'))]));
         });
         });
 
@@ -1888,6 +2533,8 @@ async function renderShotMap(round) {
         if (activeMap.getLayer('putt-labels')) {
             activeMap.setLayoutProperty('putt-labels', 'visibility', 'none');
         }
+        console.log('[shotmap] load complete', { restoreHole, hole: shotMapUi.hole, layerIds: Object.keys(holeLabelLayers).length });
+        if (restoreHole) document.querySelector(`.hole-btn[data-hole="${restoreHole}"]`)?.click();
     }); // END activeMap.on('load')
 
     // Ensure map properly sizes itself after layout changes
