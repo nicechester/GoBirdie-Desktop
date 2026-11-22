@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use sha2::Digest;
 use serde::{Serialize, Deserialize};
-use models::{GolfRound, RoundSummary, ClubInfo, Settings};
+use models::{GolfRound, RoundSummary, ClubInfo, Settings, HoleScore};
 use store::Store;
 use tauri::{AppHandle, Emitter, State};
 
@@ -203,6 +203,32 @@ fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), S
 #[tauri::command]
 fn delete_round(id: String, state: State<'_, AppState>) -> Result<bool, String> {
     state.store.lock().unwrap().delete_by_id(&id)
+}
+
+/// Replace one or more hole scores (shots, putts, score) of a stored round and
+/// recompute the scorecard totals. Returns the full updated round.
+/// GIR and fairways-hit are not recomputed (they need pin/fairway geometry).
+#[tauri::command]
+fn update_round_holes(id: String, holes: Vec<HoleScore>, state: State<'_, AppState>) -> Result<GolfRound, String> {
+    let updated = state.store.lock().unwrap().update_round(&id, |round| {
+        let sc = round.scorecard.as_mut().ok_or("Round has no scorecard")?;
+        for incoming in holes {
+            let slot = sc.hole_scores.iter_mut()
+                .find(|h| h.hole_number == incoming.hole_number)
+                .ok_or_else(|| format!("Hole {} not found in scorecard", incoming.hole_number))?;
+            *slot = incoming;
+        }
+        let total: i32 = sc.hole_scores.iter().map(|h| h.score.max(0) as i32).sum();
+        let front: i32 = sc.hole_scores.iter().filter(|h| h.hole_number <= 9).map(|h| h.score.max(0) as i32).sum();
+        let back: i32 = sc.hole_scores.iter().filter(|h| h.hole_number > 9).map(|h| h.score.max(0) as i32).sum();
+        let putts: i32 = sc.hole_scores.iter().map(|h| h.putts.max(0) as i32).sum();
+        sc.total_score = total.clamp(0, 255) as u8;
+        sc.front_score = front.clamp(0, 255) as u8;
+        sc.back_score = back.clamp(0, 255) as u8;
+        sc.total_putts = putts.clamp(0, 255) as u8;
+        Ok(())
+    })?;
+    updated.ok_or_else(|| format!("Round {} not found", id))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -613,6 +639,7 @@ fn main() {
             sync_android_rounds,
             sync_mobile_wifi,
             delete_round,
+            update_round_holes,
             fetch_elevations,
             infer_patterns,
             save_feedback,
