@@ -68,6 +68,7 @@
     justify-content: center;
     z-index: 100;
     backdrop-filter: blur(4px);
+    padding: 1rem;
 }
 .modal-overlay.hidden { display: none; }
 .modal-card {
@@ -77,6 +78,10 @@
     padding: 2rem;
     width: 100%;
     max-width: 440px;
+    /* Keep tall dialogs (e.g. settings) inside the window and scroll them */
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 /* Device option cards */

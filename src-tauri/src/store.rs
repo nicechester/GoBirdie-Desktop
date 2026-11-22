@@ -2,8 +2,16 @@ use sled::Db;
 use sha2::Digest;
 use std::path::Path;
 use crate::models::{GolfRound, RoundSummary, Settings};
+use crate::gdrive::GDriveConfig;
+use std::collections::HashSet;
 
 const SETTINGS_KEY: &[u8] = b"__app_settings__";
+const GDRIVE_CONFIG_KEY: &[u8] = b"__gdrive_config__";
+
+#[derive(serde::Deserialize)]
+struct IdOnly {
+    id: String,
+}
 
 pub struct Store {
     db: Db,
@@ -139,6 +147,41 @@ impl Store {
             }
         }
         Ok(None)
+    }
+
+    /// Every stored round with full data (shots, timelines, clubs). Non-round entries are skipped.
+    pub fn all_rounds_full(&self) -> Vec<GolfRound> {
+        self.db.iter()
+            .filter_map(|r| r.ok())
+            .filter_map(|(_, v)| serde_json::from_slice::<GolfRound>(&v).ok())
+            .filter(|r| !r.id.is_empty())
+            .collect()
+    }
+
+    /// Ids of all stored rounds, matched by the id field (not the storage key).
+    pub fn all_ids(&self) -> HashSet<String> {
+        self.db.iter()
+            .filter_map(|r| r.ok())
+            .filter_map(|(_, v)| serde_json::from_slice::<IdOnly>(&v).ok())
+            .map(|r| r.id)
+            .filter(|id| !id.is_empty())
+            .collect()
+    }
+
+    pub fn load_gdrive_config(&self) -> Option<GDriveConfig> {
+        self.db.get(GDRIVE_CONFIG_KEY).ok().flatten().and_then(|bytes| {
+            serde_json::from_slice(&bytes).ok()
+        })
+    }
+
+    pub fn save_gdrive_config(&self, config: &GDriveConfig) -> Result<(), String> {
+        let json = serde_json::to_vec(config)
+            .map_err(|e| format!("Serialize gdrive config error: {}", e))?;
+        self.db.insert(GDRIVE_CONFIG_KEY, json)
+            .map_err(|e| format!("Store gdrive config error: {}", e))?;
+        self.db.flush()
+            .map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
     }
 
     pub fn load_settings(&self) -> Option<Settings> {
