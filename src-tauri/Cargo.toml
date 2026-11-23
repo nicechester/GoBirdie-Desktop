@@ -1,6 +1,6 @@
 [package]
 name = "go-birdie-desktop"
-version = "2.4.0"
+version = "2.5.0"
 description = "Go Birdie Desktop — golf round analyzer"
 authors = ["Chester Kim"]
 edition = "2021"
@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri            = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
 tokio            = { version = "1", features = ["process", "io-util", "rt-multi-thread", "sync"] }
 llama-cpp-2      = { version = "0.1.146", default-features = false, features = ["metal"] }
 encoding_rs      = "0.8"
@@ -25,6 +26,17 @@ hex        = "0.4"
 reqwest    = { version = "0.12", features = ["blocking", "json"] }
 mdns-sd    = "0.11"
 tract-onnx = "0.21"
+rand       = "0.8"
+base64     = "0.22"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }

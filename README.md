@@ -122,6 +122,25 @@ build.bat
 
 Requires Visual Studio 2022 with C++ workload and Rust toolchain.
 
+## Google Drive Backup
+
+Rounds can be exported to, and imported from, the app's private folder in your Google Drive (`drive.appdata` scope; the app cannot see other Drive files). This is manual only.
+
+**One-time setup (for building the app):**
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Google Drive API**.
+2. Configure the **OAuth consent screen**. While the app is in "Testing" status, add your Google account as a test user. Refresh tokens expire after 7 days in Testing status.
+3. Create an **OAuth client ID** of type **Desktop app**.
+4. Either paste the Client ID into **Settings → Backup (Google Drive)** at runtime, or set it at build time:
+
+   ```bash
+   export GOBIRDIE_GOOGLE_CLIENT_ID="<client-id>.apps.googleusercontent.com"
+   export GOBIRDIE_GOOGLE_CLIENT_SECRET="<secret-if-your-client-has-one>"   # optional
+   npm run tauri:build
+   ```
+
+The refresh token is stored in the OS keychain. Nothing is stored in plain settings. Backup files are removable from Google Drive under *Manage apps → Delete hidden app data* after disconnecting.
+
 ## Architecture
 
 ```

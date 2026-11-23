@@ -83,6 +83,38 @@ async function updateRoundHoles(id, holes) {
     return invoke('update_round_holes', { id, holes });
 }
 
+async function gdriveStatus() {
+    return invoke('gdrive_get_status');
+}
+
+async function gdriveSetConfig(clientId, clientSecret) {
+    return invoke('gdrive_set_config', { clientId, clientSecret: clientSecret || null });
+}
+
+async function gdriveConnect() {
+    return invoke('gdrive_connect');
+}
+
+async function gdriveDisconnect() {
+    return invoke('gdrive_disconnect');
+}
+
+async function gdriveExport() {
+    return invoke('gdrive_export_rounds');
+}
+
+async function gdriveImport(overwrite) {
+    return invoke('gdrive_import_rounds', { overwrite: !!overwrite });
+}
+
+async function exportRoundsFile() {
+    return invoke('export_rounds_file');
+}
+
+async function importRoundsFile(overwrite) {
+    return invoke('import_rounds_file', { overwrite: !!overwrite });
+}
+
 // ── UI helpers ───────────────────────────────────────────────────────────────
 
 function toast(msg, isError = false) {
@@ -1186,7 +1218,7 @@ function hideAllShotLayers() {
 // Simple modal; returns { el, close }. A click on the backdrop reports the element itself as target.
 function openModal(innerHtml) {
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:60;';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200;';
     wrap.innerHTML = `<div class="bg-white rounded-xl shadow-xl p-5 w-96 max-w-[90vw] max-h-[80vh] overflow-auto">${innerHtml}</div>`;
     document.body.appendChild(wrap);
     return { el: wrap, close: () => wrap.remove() };
@@ -4047,6 +4079,237 @@ async function renderSetupModal(isFirstRun) {
             toast(`Settings save failed: ${e}`, true);
         }
     });
+
+}
+
+// ── Google Drive backup (settings) ───────────────────────────────────────────
+
+let gdriveUnlisten = null;
+
+function buildGDriveSection(gd) {
+    const inputCls = 'w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm';
+    const btnCls = 'px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed';
+    return `
+    <div class="border-t pt-4 space-y-3">
+        <div>
+            <h3 class="text-sm font-semibold text-gray-700">${t('gdrive.title')}</h3>
+            <p class="text-xs text-gray-400 mt-1">${t('gdrive.desc')}</p>
+        </div>
+        <div>
+            <label class="text-xs font-medium text-gray-600">${t('gdrive.clientId')}</label>
+            <input id="gdrive-client-id" type="text" class="${inputCls}"
+                placeholder="${gd.configured ? t('gdrive.configured') : ''}">
+            <p class="text-xs text-gray-400 mt-1">${t('gdrive.clientId.hint')}</p>
+        </div>
+        <div>
+            <label class="text-xs font-medium text-gray-600">${t('gdrive.clientSecret')}</label>
+            <input id="gdrive-client-secret" type="password" class="${inputCls}">
+        </div>
+        <div class="flex items-center justify-between gap-2">
+            <span id="gdrive-status" class="text-xs text-gray-500"></span>
+            <button id="gdrive-connect-btn" data-connected="${gd.connected ? '1' : '0'}" class="${btnCls}"></button>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="gdrive-export-btn" class="${btnCls} flex-1">${t('gdrive.export')}</button>
+            <button id="gdrive-import-btn" class="${btnCls} flex-1">${t('gdrive.import')}</button>
+        </div>
+        <label class="flex items-center gap-2 text-xs text-gray-600">
+            <input id="gdrive-overwrite" type="checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600">
+            ${t('gdrive.overwrite')}
+        </label>
+        <p id="gdrive-progress" class="text-xs text-gray-400 hidden"></p>
+        <p class="text-xs text-gray-400">${t('gdrive.hiddenFiles')}</p>
+    </div>`;
+}
+
+// ── File & Google Drive backup (own dialog from the File menu) ──────────────
+
+async function renderDriveModal() {
+    const modal = document.getElementById('setup-modal');
+    const gdStatus = await gdriveStatus().catch(() => ({ configured: false, connected: false }));
+    modal.innerHTML = `
+    <div class="modal-card">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-800">${t('gdrive.title')}</h2>
+            <button id="backup-close" class="text-gray-400 hover:text-gray-600 text-xl leading-none" title="${t('file.close')}">×</button>
+        </div>
+        <div class="space-y-5">
+            ${buildGDriveSection(gdStatus)}
+        </div>
+    </div>`;
+    modal.classList.remove('hidden');
+    modal.querySelector('#backup-close').addEventListener('click', () => modal.classList.add('hidden'));
+    modal.onclick = e => { if (e.target === modal) modal.classList.add('hidden'); };
+    wireGDriveSection(modal);
+}
+
+// ── Local file backup (File menu) ────────────────────────────────────────────
+
+function fileErrorText(e) {
+    const keys = {
+        file_invalid: 'file.err.invalid',
+        file_newer: 'file.err.newer',
+        file_too_large: 'file.err.too_large',
+        file_write: 'file.err.write',
+    };
+    const code = String(e);
+    return keys[code] ? t(keys[code]) : t('file.err.generic', { error: code });
+}
+
+// Export: save dialog (Rust). Cancelling does nothing.
+async function exportToFile() {
+    try {
+        const r = await exportRoundsFile();
+        if (!r) return;
+        toast(t('file.export.done', { count: r.count, path: r.path }));
+    } catch (e) {
+        toast(fileErrorText(e), true);
+    }
+}
+
+// Import: confirm and choose how to treat existing rounds, then file picker (Rust).
+async function importFromFile() {
+    const choice = await askChoice(t('file.confirm.import'), [
+        { key: 'cancel', label: t('shotmap.edit.cancel') },
+        { key: 'keep', label: t('file.import.keep') },
+        { key: 'overwrite', label: t('file.import.overwrite'), primary: true },
+    ]);
+    if (choice !== 'keep' && choice !== 'overwrite') return;
+    try {
+        const r = await importRoundsFile(choice === 'overwrite');
+        if (!r) return;
+        toast(t('file.import.done', { imported: r.imported, skipped: r.skipped_existing + r.skipped_invalid }));
+        state.rounds = await getAllRounds();
+        renderRoundsList();
+        updateStats();
+    } catch (e) {
+        toast(fileErrorText(e), true);
+    }
+}
+
+// Maps a backend error code to a localized message.
+function gdriveErrorText(e) {
+    const keys = {
+        gdrive_not_configured: 'gdrive.err.not_configured',
+        gdrive_not_connected: 'gdrive.err.not_connected',
+        gdrive_auth_revoked: 'gdrive.err.auth_revoked',
+        gdrive_auth_timeout: 'gdrive.err.auth_timeout',
+        gdrive_auth_denied: 'gdrive.err.auth_denied',
+        gdrive_network: 'gdrive.err.network',
+        gdrive_quota: 'gdrive.err.quota',
+        gdrive_busy: 'gdrive.err.busy',
+        gdrive_browser: 'gdrive.err.browser',
+        gdrive_secure_storage: 'gdrive.err.secure_storage',
+        gdrive_file_too_large: 'gdrive.err.file_too_large',
+    };
+    const code = String(e);
+    return keys[code] ? t(keys[code]) : t('gdrive.err.generic', { error: code });
+}
+
+function wireGDriveSection(modal) {
+    const el = id => modal.querySelector('#' + id);
+    const statusEl = el('gdrive-status');
+    const connectBtn = el('gdrive-connect-btn');
+    const exportBtn = el('gdrive-export-btn');
+    const importBtn = el('gdrive-import-btn');
+    const progressEl = el('gdrive-progress');
+    if (!connectBtn) return;
+
+    let connected = connectBtn.dataset.connected === '1';
+    const render = (busy = false) => {
+        connectBtn.textContent = connected ? t('gdrive.disconnect') : t('gdrive.connect');
+        statusEl.textContent = connected ? t('gdrive.status.connected') : t('gdrive.status.disconnected');
+        connectBtn.disabled = busy;
+        exportBtn.disabled = busy || !connected;
+        importBtn.disabled = busy || !connected;
+    };
+    // An auth failure means the stored sign-in is gone; reflect that in the UI.
+    const handleError = (e) => {
+        if (String(e) === 'gdrive_auth_revoked' || String(e) === 'gdrive_not_connected') connected = false;
+        toast(gdriveErrorText(e), true);
+    };
+
+    // Progress from the backend (one event per round).
+    if (gdriveUnlisten) gdriveUnlisten();
+    gdriveUnlisten = null;
+    listen('gdrive-progress', ev => {
+        const { phase, done, total } = ev.payload ?? {};
+        progressEl.textContent = t(phase === 'export' ? 'gdrive.progressExport' : 'gdrive.progressImport', { done, total });
+    }).then(unlisten => { gdriveUnlisten = unlisten; });
+
+    render();
+
+    connectBtn.addEventListener('click', async () => {
+        if (connected) {
+            render(true);
+            try {
+                await gdriveDisconnect();
+                connected = false;
+                toast(t('gdrive.disconnected'));
+            } catch (e) {
+                handleError(e);
+            }
+            render();
+            return;
+        }
+        try {
+            const clientId = el('gdrive-client-id').value.trim();
+            const clientSecret = el('gdrive-client-secret').value.trim();
+            if (clientId) await gdriveSetConfig(clientId, clientSecret);
+        } catch (e) {
+            handleError(e);
+            return;
+        }
+        render(true);
+        statusEl.textContent = t('gdrive.waiting');
+        try {
+            await gdriveConnect();
+            connected = true;
+            toast(t('gdrive.status.connected'));
+        } catch (e) {
+            handleError(e);
+        }
+        render();
+    });
+
+    exportBtn.addEventListener('click', async () => {
+        render(true);
+        progressEl.classList.remove('hidden');
+        progressEl.textContent = t('gdrive.progressExport', { done: 0, total: 0 });
+        try {
+            const r = await gdriveExport();
+            toast(t('gdrive.export.done', { uploaded: r.uploaded, updated: r.updated, failed: r.failed }));
+        } catch (e) {
+            handleError(e);
+        } finally {
+            progressEl.classList.add('hidden');
+            render();
+        }
+    });
+
+    importBtn.addEventListener('click', async () => {
+        const overwrite = el('gdrive-overwrite').checked;
+        const choice = await askChoice(t('gdrive.confirm.import'), [
+            { key: 'no', label: t('shotmap.edit.no') },
+            { key: 'yes', label: t('shotmap.edit.yes'), primary: true },
+        ]);
+        if (choice !== 'yes') return;
+        render(true);
+        progressEl.classList.remove('hidden');
+        progressEl.textContent = t('gdrive.progressImport', { done: 0, total: 0 });
+        try {
+            const r = await gdriveImport(overwrite);
+            toast(t('gdrive.import.done', { imported: r.imported, skipped: r.skipped_existing + r.skipped_invalid }));
+            state.rounds = await getAllRounds();
+            renderRoundsList();
+            updateStats();
+        } catch (e) {
+            handleError(e);
+        } finally {
+            progressEl.classList.add('hidden');
+            render();
+        }
+    });
 }
 
 async function handleAppleSync() {
@@ -4270,27 +4533,17 @@ async function updateStats() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
-// ── Hamburger Menu ───────────────────────────────────────────────────────────
+// ── Native menu actions (menu bar on macOS, in-window menu elsewhere) ───────
 
-function initHamburgerMenu() {
-    const btn = document.getElementById('hamburger-btn');
-    const menu = document.getElementById('hamburger-menu');
-
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        menu.classList.toggle('hidden');
-    });
-
-    document.addEventListener('click', () => menu.classList.add('hidden'));
-
-    document.getElementById('menu-trends').addEventListener('click', () => {
-        menu.classList.add('hidden');
-        showTrendsView();
-    });
-
-    document.getElementById('menu-settings').addEventListener('click', async () => {
-        menu.classList.add('hidden');
-        await renderSetupModal(false);
+function initMenuActions() {
+    listen('menu-action', async ev => {
+        switch (ev.payload) {
+            case 'settings': await renderSetupModal(false); break;
+            case 'trends': showTrendsView(); break;
+            case 'file-export': await exportToFile(); break;
+            case 'file-import': await importFromFile(); break;
+            case 'gdrive': await renderDriveModal(); break;
+        }
     });
 }
 
@@ -5063,7 +5316,7 @@ async function init() {
         renderRoundsList();
     });
 
-    initHamburgerMenu();
+    initMenuActions();
     applyStaticTranslations();
 
     // Check first-run: load settings
@@ -5101,8 +5354,6 @@ function applyStaticTranslations() {
     document.getElementById('app-title').textContent = t('app.title');
     document.getElementById('sync-label').textContent = state.syncing ? t('sync.syncing') : t('sync.label');
     document.getElementById('search-input').placeholder = t('search.placeholder');
-    document.getElementById('menu-trends-label').textContent = t('menu.trends');
-    document.getElementById('menu-settings-label').textContent = t('menu.settings');
 }
 
 export { state, buildAiPrompt, computeStrokesGained };

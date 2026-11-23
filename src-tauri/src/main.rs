@@ -11,6 +11,9 @@ mod mobile_sync;
 #[cfg(not(target_os = "windows"))]
 mod apple_sync;
 mod android_sync;
+mod gdrive;
+mod file_backup;
+mod app_menu;
 
 
 use std::collections::HashMap;
@@ -20,7 +23,7 @@ use sha2::Digest;
 use serde::{Serialize, Deserialize};
 use models::{GolfRound, RoundSummary, ClubInfo, Settings, HoleScore};
 use store::Store;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
     store: Mutex<Store>,
@@ -203,6 +206,67 @@ fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), S
 #[tauri::command]
 fn delete_round(id: String, state: State<'_, AppState>) -> Result<bool, String> {
     state.store.lock().unwrap().delete_by_id(&id)
+}
+
+/// Runs blocking Drive/network work off the UI thread.
+async fn run_blocking<T, F>(app: AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(AppHandle) -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || f(app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn gdrive_get_status(app: AppHandle) -> Result<gdrive::GDriveStatus, String> {
+    gdrive::status(&app)
+}
+
+#[tauri::command]
+fn gdrive_set_config(client_id: String, client_secret: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    gdrive::set_config(&state, client_id, client_secret)
+}
+
+#[tauri::command]
+async fn gdrive_connect(app: AppHandle) -> Result<(), String> {
+    run_blocking(app, |app| gdrive::connect(&app)).await
+}
+
+#[tauri::command]
+async fn gdrive_disconnect(app: AppHandle) -> Result<(), String> {
+    run_blocking(app, |app| gdrive::disconnect(&app)).await
+}
+
+#[tauri::command]
+async fn gdrive_export_rounds(app: AppHandle) -> Result<gdrive::ExportResult, String> {
+    run_blocking(app, |app| gdrive::export(&app)).await
+}
+
+#[tauri::command]
+async fn gdrive_import_rounds(overwrite: bool, app: AppHandle) -> Result<gdrive::ImportResult, String> {
+    run_blocking(app, move |app| gdrive::import(&app, overwrite)).await
+}
+
+/// Opens a save dialog and writes the rounds file. `None` means the user cancelled.
+#[tauri::command]
+async fn export_rounds_file(app: AppHandle) -> Result<Option<file_backup::ExportFileResult>, String> {
+    run_blocking(app, |app| {
+        let state = app.state::<AppState>();
+        file_backup::export_with_dialog(&app, &state)
+    })
+    .await
+}
+
+/// Opens a file picker and imports the chosen rounds file. `None` means the user cancelled.
+#[tauri::command]
+async fn import_rounds_file(overwrite: bool, app: AppHandle) -> Result<Option<file_backup::ImportFileResult>, String> {
+    run_blocking(app, move |app| {
+        let state = app.state::<AppState>();
+        file_backup::import_with_dialog(&app, &state, overwrite)
+    })
+    .await
 }
 
 /// Replace one or more hole scores (shots, putts, score) of a stored round and
@@ -566,8 +630,10 @@ fn get_round_feedback(round_id: String, state: State<'_, AppState>) -> serde_jso
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
+            app_menu::install(app.handle())?;
 
             let app_dir = dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
@@ -640,6 +706,14 @@ fn main() {
             sync_mobile_wifi,
             delete_round,
             update_round_holes,
+            gdrive_get_status,
+            gdrive_set_config,
+            gdrive_connect,
+            gdrive_disconnect,
+            gdrive_export_rounds,
+            gdrive_import_rounds,
+            export_rounds_file,
+            import_rounds_file,
             fetch_elevations,
             infer_patterns,
             save_feedback,
