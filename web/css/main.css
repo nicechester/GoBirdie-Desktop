@@ -71,6 +71,23 @@
     padding: 1rem;
 }
 .modal-overlay.hidden { display: none; }
+/* Settings window: the form fills the window instead of floating over a dimmed page */
+.settings-window #setup-modal {
+    position: fixed;
+    inset: 0;
+    background: #f9fafb;
+    backdrop-filter: none;
+    padding: 0;
+    overflow-y: auto;
+}
+.settings-window #setup-modal .modal-card {
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 1.5rem 2rem;
+}
 .modal-card {
     background: white;
     border-radius: 1rem;
