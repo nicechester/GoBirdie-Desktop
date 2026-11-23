@@ -333,6 +333,16 @@ pub struct RoundSummary {
     pub min_altitude_meters: Option<f32>,
     pub max_altitude_meters: Option<f32>,
     pub avg_swing_tempo: Option<f32>,
+    // Course and scoring details for trends filters and the handicap estimate.
+    #[serde(default)]
+    pub course_id: u64,
+    #[serde(default)]
+    pub course_rating: f32,
+    #[serde(default)]
+    pub slope: u8,
+    /// Holes with a recorded score (> 0). Used for the 9/18-hole filter and handicap bucket.
+    #[serde(default)]
+    pub scored_holes: u8,
 }
 
 fn default_source_garmin() -> String { "garmin".to_string() }
@@ -361,6 +371,12 @@ impl From<&GolfRound> for RoundSummary {
             min_altitude_meters: r.min_altitude_meters,
             max_altitude_meters: r.max_altitude_meters,
             avg_swing_tempo: r.avg_swing_tempo,
+            course_id: sc.map(|s| s.course_id).unwrap_or(0),
+            course_rating: sc.map(|s| s.course_rating).unwrap_or(0.0),
+            slope: sc.map(|s| s.slope).unwrap_or(0),
+            scored_holes: sc
+                .map(|s| s.hole_scores.iter().filter(|h| h.score > 0).count() as u8)
+                .unwrap_or(0),
         }
     }
 }

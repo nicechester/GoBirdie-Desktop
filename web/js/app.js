@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { defaultFilters, isFilterActive, effectiveDateRange, courseKey, filterRounds, listCourses, computeHandicaps } from './trends-calc.js';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
 import { openCoachingModal } from './coaching-panel.js';
 import { t, getLang, setLang } from './i18n.js';
@@ -4539,7 +4541,7 @@ function initMenuActions() {
     listen('menu-action', async ev => {
         switch (ev.payload) {
             case 'settings': await renderSetupModal(false); break;
-            case 'trends': showTrendsView(); break;
+            case 'trends': await openTrendsWindow(); break;
             case 'file-export': await exportToFile(); break;
             case 'file-import': await importFromFile(); break;
             case 'gdrive': await renderDriveModal(); break;
@@ -4549,10 +4551,63 @@ function initMenuActions() {
 
 // ── Trends View ──────────────────────────────────────────────────────────────
 
+// ── Trends: filters (date range, courses, 9/18 holes, last N) and handicap ────
+
+const TRENDS_FILTER_KEY = 'gobirdie.trendsFilters';
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Local calendar date as YYYY-MM-DD (not toISOString, which is UTC).
+function todayLocalStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Restores filters from sessionStorage; falls back to in-memory defaults if storage is unavailable.
+function loadFilters() {
+    const base = defaultFilters();
+    try {
+        const raw = sessionStorage.getItem(TRENDS_FILTER_KEY);
+        if (raw) Object.assign(base, JSON.parse(raw));
+    } catch (e) { /* storage unavailable or corrupt: use defaults */ }
+    // Drop courses that no longer exist in the data; if none remain, the filter is cleared.
+    const known = new Set(state.rounds.map(r => courseKey(r)));
+    base.lastN = null;   // no last-N control any more
+    base.courses = (Array.isArray(base.courses) ? base.courses : []).filter(k => known.has(k));
+    return base;
+}
+
+function saveFilters() {
+    try {
+        sessionStorage.setItem(TRENDS_FILTER_KEY, JSON.stringify(state._trendsFilters));
+    } catch (e) { /* keep in memory only */ }
+}
+
+// Single source for what the Trends page shows.
+function getTrendsData() {
+    const filters = state._trendsFilters;
+    const today = todayLocalStr();
+    const filtered = filterRounds(state.rounds, filters, today);
+    const ids = new Set(filtered.map(r => r.id));
+    const light = (state._trendLightRounds || []).filter(r => ids.has(r.id));
+    // The handicap ignores last-N: its own "most recent 20" rule replaces it.
+    const handicapSet = filterRounds(state.rounds, { ...filters, lastN: null }, today);
+    return { filtered, light, handicapSet };
+}
+
+function subtitleText(count) {
+    const total = state.rounds.filter(r => r.total_score > 0).length;
+    return isFilterActive(state._trendsFilters)
+        ? t('trends.subtitle.filtered', { count, total })
+        : t('trends.subtitle', { count });
+}
+
 async function showTrendsView() {
     state.activeView = 'trends';
     state.activeId = null;
-    state._trendsFilter = null; // null = all
+    if (!state._trendsFilters) state._trendsFilters = loadFilters();
     renderRoundsList();
 
     const content = document.getElementById('detail-content');
@@ -4560,18 +4615,21 @@ async function showTrendsView() {
     content.classList.remove('hidden');
     empty.classList.add('hidden');
 
-    const allSummary = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
-    if (!allSummary.length) {
-        content.innerHTML = buildTrendsPage(allSummary, null);
+    if (!state.rounds.some(r => r.total_score > 0)) {
+        content.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-gray-400 py-20">
+            <span class="text-5xl mb-4">📊</span>
+            <p class="text-lg">${t('trends.nodata')}</p>
+        </div>`;
         return;
     }
 
-    // Render with all rounds initially
-    content.innerHTML = buildTrendsPage(allSummary, null);
-    renderTrendsCharts(allSummary);
+    const { filtered } = getTrendsData();
+    content.innerHTML = buildTrendsPage();
+    if (filtered.length) renderTrendsCharts(filtered);
     wireTrendsFilter();
+    syncFilterBar();
 
-    // Load light rounds for SG + club trends
+    // Light rounds (SG and club trends) load asynchronously.
     try {
         state._trendLightRounds = await getAllRoundsLight();
         if (state.activeView !== 'trends') return;
@@ -4581,42 +4639,243 @@ async function showTrendsView() {
     }
 }
 
+function buildTrendsFilterBar() {
+    const pill = (active, attrs, label) => `<button ${attrs} class="px-3 py-1 text-xs rounded-full border transition ${
+        active ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}">${label}</button>`;
+    const f = state._trendsFilters;
+    return `
+    <div id="trends-filter-bar" class="bg-white rounded-xl shadow-sm border p-3 space-y-3">
+        <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-400">${t('trends.filter.date')}</span>
+                <select id="trends-date-preset" class="px-2 py-1 text-xs border rounded-lg bg-white">
+                    <option value="all">${t('trends.filter.preset.all')}</option>
+                    <option value="season">${t('trends.filter.preset.season')}</option>
+                    <option value="12m">${t('trends.filter.preset.12m')}</option>
+                    <option value="custom">${t('trends.filter.preset.custom')}</option>
+                </select>
+                <div id="trends-date-custom" class="hidden">
+                    <div class="flex items-center gap-1 text-xs text-gray-500">
+                        <input id="trends-date-from" type="date" class="px-2 py-1 border rounded-lg text-xs" aria-label="${t('trends.filter.from')}">
+                        <span>–</span>
+                        <input id="trends-date-to" type="date" class="px-2 py-1 border rounded-lg text-xs" aria-label="${t('trends.filter.to')}">
+                    </div>
+                </div>
+            </div>
+            <div class="relative">
+                <button id="trends-course-btn" class="px-3 py-1 text-xs rounded-full border border-gray-300 hover:bg-blue-50 transition"></button>
+                <div id="trends-course-menu" class="hidden absolute z-20 mt-1 w-64 max-h-64 overflow-y-auto bg-white border rounded-lg shadow-lg p-2"></div>
+            </div>
+            <div class="flex gap-1" data-group="holes">
+                ${pill(f.holes === 'all', 'data-holes="all"', t('shotmap.all'))}
+                ${pill(f.holes === 9, 'data-holes="9"', t('trends.filter.holes9'))}
+                ${pill(f.holes === 18, 'data-holes="18"', t('trends.filter.holes18'))}
+            </div>
+            <button id="trends-clear" class="ml-auto px-3 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">${t('trends.filter.clear')}</button>
+        </div>
+        <div id="trends-chips" class="hidden flex flex-wrap items-center gap-2"></div>
+    </div>`;
+}
+
+function buildTrendsPage() {
+    const { filtered } = getTrendsData();
+    return `
+    <div class="pt-6 pb-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <h2 class="text-2xl font-bold text-gray-800">📊 ${t('trends.title')}</h2>
+            <span id="trends-subtitle" class="text-sm text-gray-400">${subtitleText(filtered.length)}</span>
+        </div>
+        ${buildTrendsFilterBar()}
+        <div id="trends-body" class="space-y-6">
+            ${buildTrendsBody()}
+        </div>
+    </div>`;
+}
+
+// Body = handicap card, then the trend sections for the filtered rounds (or an empty state).
+function buildTrendsBody() {
+    const { filtered, handicapSet } = getTrendsData();
+    const handicap = buildHandicapCard(handicapSet);
+    if (!filtered.length) {
+        return `${handicap}
+        <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">
+            <p class="mb-3">${t('trends.nomatch')}</p>
+            <button data-clear-filters class="px-3 py-1.5 text-xs rounded-lg border border-gray-300 hover:bg-gray-50">${t('trends.filter.clear')}</button>
+        </div>`;
+    }
+    return `
+        ${handicap}
+        ${buildScoringTrends(filtered)}
+        ${buildShortGameTrends(filtered)}
+        <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+        <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
+        ${buildFitnessTrends(filtered)}`;
+}
+
 function wireTrendsFilter() {
-    document.querySelectorAll('.trends-filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.trends-filter-btn').forEach(b => {
-                b.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
-                b.classList.add('border-gray-300');
-            });
-            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
-            btn.classList.remove('border-gray-300');
-            state._trendsFilter = btn.dataset.n === 'all' ? null : parseInt(btn.dataset.n);
-            rebuildTrends();
-        });
+    const bar = document.getElementById('trends-filter-bar');
+    if (!bar) return;
+    bar.addEventListener('click', onTrendsFilterClick);
+    bar.addEventListener('change', onTrendsFilterChange);
+    document.getElementById('trends-body')?.addEventListener('click', e => {
+        if (e.target.closest('[data-clear-filters]')) {
+            state._trendsFilters = defaultFilters();
+            commitTrendsFilters();
+        }
     });
+
+    // Close the course menu on any outside click (one listener, replaced on each render).
+    if (state._courseOutsideHandler) document.removeEventListener('click', state._courseOutsideHandler);
+    state._courseOutsideHandler = e => {
+        if (!state._courseMenuOpen) return;
+        if (e.target.closest('#trends-course-menu') || e.target.closest('#trends-course-btn')) return;
+        state._courseMenuOpen = false;
+        document.getElementById('trends-course-menu')?.classList.add('hidden');
+    };
+    document.addEventListener('click', state._courseOutsideHandler);
+}
+
+function commitTrendsFilters() {
+    saveFilters();
+    rebuildTrends();
+}
+
+function onTrendsFilterClick(e) {
+    const f = state._trendsFilters;
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.id === 'trends-course-btn') {
+        state._courseMenuOpen = !state._courseMenuOpen;
+        syncFilterBar();
+    } else if (btn.id === 'trends-clear') {
+        state._trendsFilters = defaultFilters();
+        commitTrendsFilters();
+    } else if (btn.dataset.holes) {
+        f.holes = btn.dataset.holes === 'all' ? 'all' : Number(btn.dataset.holes);
+        commitTrendsFilters();
+    } else if ('courseAll' in btn.dataset) {
+        f.courses = [];
+        commitTrendsFilters();
+    } else if (btn.dataset.chip) {
+        removeTrendsChip(btn.dataset.chip);
+    }
+}
+
+function onTrendsFilterChange(e) {
+    const f = state._trendsFilters;
+    const target = e.target;
+    if (target.id === 'trends-date-preset') {
+        f.preset = target.value;
+        if (f.preset !== 'custom') { f.dateFrom = null; f.dateTo = null; }
+        commitTrendsFilters();
+    } else if (target.id === 'trends-date-from' || target.id === 'trends-date-to') {
+        let from = document.getElementById('trends-date-from').value || null;
+        let to = document.getElementById('trends-date-to').value || null;
+        if (from && to && from > to) [from, to] = [to, from];   // swap instead of rejecting
+        f.preset = 'custom';
+        f.dateFrom = from;
+        f.dateTo = to;
+        commitTrendsFilters();
+    } else if (target.dataset.course !== undefined) {
+        const key = target.dataset.course;
+        f.courses = target.checked
+            ? [...new Set([...f.courses, key])]
+            : f.courses.filter(k => k !== key);
+        commitTrendsFilters();
+    }
+}
+
+function removeTrendsChip(chip) {
+    const f = state._trendsFilters;
+    if (chip === 'date') { f.preset = 'all'; f.dateFrom = null; f.dateTo = null; }
+    else if (chip === 'holes') f.holes = 'all';
+    else if (chip.startsWith('course:')) {
+        const key = chip.slice('course:'.length);
+        f.courses = f.courses.filter(k => k !== key);
+    }
+    commitTrendsFilters();
+}
+
+// Updates the filter bar in place (no re-render), so date inputs keep focus.
+function syncFilterBar() {
+    const bar = document.getElementById('trends-filter-bar');
+    if (!bar) return;
+    const f = state._trendsFilters;
+    const today = todayLocalStr();
+    const range = effectiveDateRange(f, today);
+
+    const setPill = (btn, active) => {
+        btn.classList.toggle('bg-blue-600', active);
+        btn.classList.toggle('text-white', active);
+        btn.classList.toggle('border-blue-600', active);
+        btn.classList.toggle('border-gray-300', !active);
+    };
+    document.getElementById('trends-date-preset').value = f.preset;
+    document.getElementById('trends-date-custom').classList.toggle('hidden', f.preset !== 'custom');
+    bar.querySelectorAll('[data-group="holes"] button').forEach(b =>
+        setPill(b, String(f.holes) === b.dataset.holes));
+
+    document.getElementById('trends-date-from').value = f.preset === 'custom' ? (f.dateFrom ?? '') : '';
+    document.getElementById('trends-date-to').value = f.preset === 'custom' ? (f.dateTo ?? '') : '';
+
+    const courseBtn = document.getElementById('trends-course-btn');
+    courseBtn.textContent = f.courses.length
+        ? t('trends.filter.courses.n', { n: f.courses.length })
+        : t('trends.filter.courses');
+    renderCourseMenu();
+    document.getElementById('trends-course-menu').classList.toggle('hidden', !state._courseMenuOpen);
+
+    document.getElementById('trends-clear').disabled = !isFilterActive(f);
+    renderTrendsChips();
+}
+
+function renderCourseMenu() {
+    const menu = document.getElementById('trends-course-menu');
+    if (!menu) return;
+    const f = state._trendsFilters;
+    const courses = listCourses(state.rounds, f, todayLocalStr());
+    const all = `<button data-course-all class="w-full text-left px-2 py-1 text-xs rounded hover:bg-gray-50 ${f.courses.length ? 'text-blue-600' : 'text-gray-500'}">${t('trends.filter.courses.all')}</button>`;
+    const rows = courses.map(c => `
+        <label class="flex items-center gap-2 px-2 py-1 text-xs text-gray-700 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" data-course="${escapeHtml(c.key)}" ${f.courses.includes(c.key) ? 'checked' : ''}>
+            <span class="truncate">${escapeHtml(c.name)} (${c.count})</span>
+        </label>`).join('');
+    menu.innerHTML = all + rows;
+}
+
+function renderTrendsChips() {
+    const box = document.getElementById('trends-chips');
+    if (!box) return;
+    const f = state._trendsFilters;
+    const range = effectiveDateRange(f, todayLocalStr());
+    const chips = [];
+    if (f.preset !== 'all') chips.push({ key: 'date', label: `${range.from ?? '…'} – ${range.to ?? '…'}` });
+    f.courses.forEach(key => {
+        const round = state.rounds.find(r => courseKey(r) === key);
+        chips.push({ key: `course:${key}`, label: round?.course_name || '—' });
+    });
+    if (f.holes !== 'all') chips.push({ key: 'holes', label: t(f.holes === 9 ? 'trends.filter.holes9' : 'trends.filter.holes18') });
+
+    box.classList.toggle('hidden', chips.length === 0);
+    box.innerHTML = chips.length ? `
+        <span class="text-xs text-gray-400">${t('trends.filter.active')}:</span>
+        ${chips.map(c => `
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs">
+            ${escapeHtml(c.label)}
+            <button data-chip="${escapeHtml(c.key)}" aria-label="${t('trends.filter.remove')}" class="hover:text-blue-900 leading-none">×</button>
+        </span>`).join('')}` : '';
 }
 
 function rebuildTrends() {
-    const n = state._trendsFilter;
-    const allSummary = state.rounds.filter(r => r.total_score > 0).sort((a, b) => a.date.localeCompare(b.date));
-    const filtered = n ? allSummary.slice(-n) : allSummary;
-
-    // Rebuild summary sections
     const container = document.getElementById('trends-body');
     if (!container) return;
-    container.innerHTML = `
-        ${buildScoringTrends(filtered)}
-        ${buildShortGameTrends(filtered)}
-        <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${state._trendLightRounds ? '' : t('detail.loading')}</div></div>
-        <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${state._trendLightRounds ? '' : t('detail.loading')}</div></div>
-        ${buildFitnessTrends(filtered)}`;
-
-    renderTrendsCharts(filtered);
+    const { filtered } = getTrendsData();
+    container.innerHTML = buildTrendsBody();
+    if (filtered.length) renderTrendsCharts(filtered);
     if (state._trendLightRounds) renderTrendsDetailSections();
-
-    // Update subtitle count
     const subtitle = document.getElementById('trends-subtitle');
-    if (subtitle) subtitle.textContent = t('trends.subtitle', { count: filtered.length });
+    if (subtitle) subtitle.textContent = subtitleText(filtered.length);
+    syncFilterBar();
 }
 
 function renderTrendsCharts(summaryRounds) {
@@ -4628,54 +4887,81 @@ function renderTrendsCharts(summaryRounds) {
 }
 
 function renderTrendsDetailSections() {
-    const n = state._trendsFilter;
-    const lightRounds = n ? state._trendLightRounds.slice(-n) : state._trendLightRounds;
-
     const sgSection = document.getElementById('trends-sg-section');
     const clubSection = document.getElementById('trends-club-section');
-    if (sgSection) {
-        sgSection.innerHTML = buildSgTrends(lightRounds);
-        requestAnimationFrame(() => renderSgTrendChart(lightRounds));
+    if (!sgSection || !clubSection) return;
+    const { light } = getTrendsData();
+    if (!light.length) {
+        sgSection.innerHTML = `<div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('trends.nomatch')}</div>`;
+        clubSection.innerHTML = '';
+        return;
     }
-    if (clubSection) {
-        clubSection.innerHTML = buildClubTrends(lightRounds);
-        wireClubTrendControls(lightRounds);
-    }
+    sgSection.innerHTML = buildSgTrends(light);
+    requestAnimationFrame(() => renderSgTrendChart(light));
+    clubSection.innerHTML = buildClubTrends(light);
+    wireClubTrendControls(light);
 }
 
-function buildTrendsPage(rounds, filterN) {
-    if (!rounds.length) {
-        return `<div class="flex flex-col items-center justify-center h-full text-gray-400 py-20">
-            <span class="text-5xl mb-4">📊</span>
-            <p class="text-lg">${t('trends.nodata')}</p>
+// ── Handicap estimate card (no canvas; re-rendered with the body) ───────────
+
+function buildHandicapCard(handicapSet) {
+    const holes = state._trendsFilters.holes;
+    const { h18, h9 } = computeHandicaps(handicapSet);
+    const cells = [];
+    if (holes === 'all' || holes === 18) cells.push({ h: h18, label: 't18' });
+    if (holes === 'all' || holes === 9) cells.push({ h: h9, label: 't9' });
+    // With "All", hide a bucket that has no rounds at all; a specific filter always shows its card.
+    const visible = cells.filter(c => holes !== 'all' || c.h.eligible + c.h.excluded > 0);
+    if (!visible.length) return '';
+
+    const cell = ({ h, label }) => {
+        const titleKey = label === 't18' ? 'trends.handicap.index18' : 'trends.handicap.index9';
+        const index = h.status === 'ok' ? h.index.toFixed(1) : '—';
+        let note = '';
+        if (h.status === 'insufficient') note = t('trends.handicap.notenough', { needed: h.needed, have: h.eligible });
+        if (h.status === 'norated') note = t('trends.handicap.norated');
+        const excluded = h.excluded > 0 && h.status !== 'norated'
+            ? `<p class="text-xs text-gray-400">${t('trends.handicap.excluded', { n: h.excluded })}</p>` : '';
+        const used = h.status === 'ok' ? `
+            <details class="mt-3">
+                <summary class="text-xs text-blue-600 cursor-pointer">${t('trends.handicap.used', { best: h.best, recent: h.recent })}</summary>
+                <table class="w-full text-xs mt-2">
+                    <thead><tr class="text-gray-400">
+                        <th class="text-left font-normal py-1">${t('trends.filter.date')}</th>
+                        <th class="text-left font-normal py-1">${t('trends.filter.courses')}</th>
+                        <th class="text-right font-normal py-1">${t('trends.handicap.diff')}</th>
+                        <th class="text-right font-normal py-1">${t('trends.handicap.counted')}</th>
+                    </tr></thead>
+                    <tbody>${h.used.map(u => `
+                        <tr class="${u.counted ? 'font-semibold text-gray-800' : 'text-gray-400'}">
+                            <td class="py-0.5">${escapeHtml(u.date)}</td>
+                            <td class="py-0.5 truncate max-w-[10rem]">${escapeHtml(u.course_name || '—')}</td>
+                            <td class="py-0.5 text-right">${u.diff.toFixed(1)}</td>
+                            <td class="py-0.5 text-right">${u.counted ? '✓' : ''}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </details>` : '';
+        const nineNote = label === 't9' ? `<p class="text-xs text-gray-400 mt-2">${t('trends.handicap.nine')}</p>` : '';
+        return `
+        <div class="flex-1 min-w-[16rem] bg-gray-50 rounded-lg p-4">
+            <div class="text-xs text-gray-500">${t(titleKey)}</div>
+            <div class="text-3xl font-bold text-gray-800 mt-1">${index}</div>
+            ${note ? `<p class="text-xs text-gray-500 mt-2">${note}</p>` : ''}
+            ${excluded}
+            ${used}
+            ${nineNote}
         </div>`;
-    }
+    };
 
     return `
-    <div class="pt-6 pb-6 space-y-6">
-        <div class="flex items-center justify-between">
-            <h2 class="text-2xl font-bold text-gray-800">📊 ${t('trends.title')}</h2>
-            <div class="flex items-center gap-3">
-                <span id="trends-subtitle" class="text-sm text-gray-400">${t('trends.subtitle', { count: rounds.length })}</span>
-                <div class="flex gap-1">
-                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
-                        ${filterN === 10 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="10">${t('trends.last')} 10</button>
-                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
-                        ${filterN === 20 ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="20">${t('trends.last')} 20</button>
-                    <button class="trends-filter-btn px-3 py-1 text-xs rounded-full border transition
-                        ${filterN == null ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-blue-50'}" data-n="all">${t('shotmap.all')}</button>
-                </div>
-            </div>
-        </div>
-        <div id="trends-body" class="space-y-6">
-            ${buildScoringTrends(rounds)}
-            ${buildShortGameTrends(rounds)}
-            <div id="trends-sg-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
-            <div id="trends-club-section"><div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 py-8">${t('detail.loading')}</div></div>
-            ${buildFitnessTrends(rounds)}
-        </div>
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-1">${t('trends.handicap.title')}</h3>
+        <p class="text-xs text-gray-400 mb-4">${t('trends.handicap.estimate')} ${t('trends.handicap.note')}</p>
+        <div class="flex flex-wrap gap-4">${visible.map(cell).join('')}</div>
     </div>`;
 }
+
 
 function buildScoringTrends(rounds) {
     const scores = rounds.map(r => r.total_score);
@@ -5307,7 +5593,39 @@ document.addEventListener('click', async e => {
     invoke('save_feedback', { roundId, code, helpful }).catch(console.error);
 });
 
+// Trends runs in its own window (?view=trends). It shares the web app but shows only the trends page.
+const isTrendsWindow = new URLSearchParams(window.location.search).get('view') === 'trends';
+
+async function openTrendsWindow() {
+    const existing = await WebviewWindow.getByLabel('trends');
+    if (existing) {
+        await existing.show();
+        await existing.setFocus();
+        return;
+    }
+    new WebviewWindow('trends', {
+        url: 'index.html?view=trends',
+        title: 'GoBirdie — Trends',
+        width: 1100,
+        height: 800,
+        minWidth: 720,
+        minHeight: 560,
+    });
+}
+
+async function initTrendsWindow() {
+    document.querySelector('header')?.classList.add('hidden');
+    document.getElementById('rounds-sidebar')?.classList.add('hidden');
+    state.settings = await getSettings().catch(() => null);
+    state.rounds = await getAllRounds().catch(() => []);
+    await showTrendsView();
+}
+
 async function init() {
+    if (isTrendsWindow) {
+        await initTrendsWindow();
+        return;
+    }
     document.getElementById('sync-btn').addEventListener('click', handleSync);
     document.getElementById('apple-sync-btn')?.addEventListener('click', handleAppleSync);
     document.getElementById('android-sync-btn')?.addEventListener('click', handleAndroidSync);
