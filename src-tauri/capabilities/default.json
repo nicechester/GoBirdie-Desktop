@@ -2,10 +2,16 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities",
-  "windows": ["main"],
+  "windows": [
+    "main",
+    "trends"
+  ],
   "permissions": [
     "core:default",
     "shell:default",
-    "dialog:default"
+    "dialog:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }
