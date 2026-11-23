@@ -4,7 +4,8 @@
   "description": "Default capabilities",
   "windows": [
     "main",
-    "trends"
+    "trends",
+    "settings"
   ],
   "permissions": [
     "core:default",
@@ -12,6 +13,8 @@
     "dialog:default",
     "core:webview:allow-create-webview-window",
     "core:window:allow-show",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "core:window:allow-destroy",
+    "core:event:default"
   ]
 }

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen, emit } from '@tauri-apps/api/event';
+import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { defaultFilters, isFilterActive, effectiveDateRange, courseKey, filterRounds, listCourses, computeHandicaps } from './trends-calc.js';
 import { buildInsightsCard, buildInsightsText, generateInsights } from './nlg-engine.js';
 import { openCoachingModal } from './coaching-panel.js';
@@ -4072,6 +4072,12 @@ async function renderSetupModal(isFirstRun) {
                 setLang(selectedLang);
                 onLangChange();
             }
+            if (isSettingsWindow) {
+                state._settingsDirty = false;
+                await emit('settings-changed', { settings, language: selectedLang });
+                await getCurrentWebviewWindow().destroy();
+                return;
+            }
             modal.classList.add('hidden');
             applySyncButtonVisibility();
             if (isFirstRun) {
@@ -4538,9 +4544,10 @@ async function updateStats() {
 // ── Native menu actions (menu bar on macOS, in-window menu elsewhere) ───────
 
 function initMenuActions() {
+    listen('settings-changed', ev => applySettingsChange(ev.payload));
     listen('menu-action', async ev => {
         switch (ev.payload) {
-            case 'settings': await renderSetupModal(false); break;
+            case 'settings': await openSettingsWindow(); break;
             case 'trends': await openTrendsWindow(); break;
             case 'file-export': await exportToFile(); break;
             case 'file-import': await importFromFile(); break;
@@ -5595,6 +5602,7 @@ document.addEventListener('click', async e => {
 
 // Trends runs in its own window (?view=trends). It shares the web app but shows only the trends page.
 const isTrendsWindow = new URLSearchParams(window.location.search).get('view') === 'trends';
+const isSettingsWindow = new URLSearchParams(window.location.search).get('view') === 'settings';
 
 async function openTrendsWindow() {
     const existing = await WebviewWindow.getByLabel('trends');
@@ -5621,9 +5629,76 @@ async function initTrendsWindow() {
     await showTrendsView();
 }
 
+// ── Settings window (own window, ?view=settings) ─────────────────────────────
+
+async function openSettingsWindow() {
+    const existing = await WebviewWindow.getByLabel('settings');
+    if (existing) {
+        await existing.show();
+        await existing.setFocus();
+        return;
+    }
+    new WebviewWindow('settings', {
+        url: 'index.html?view=settings',
+        title: 'GoBirdie — Settings',
+        width: 560,
+        height: 720,
+        minWidth: 420,
+        minHeight: 520,
+    });
+}
+
+async function initSettingsWindow() {
+    document.body.classList.add('settings-window');
+    document.querySelector('header')?.classList.add('hidden');
+    document.getElementById('rounds-sidebar')?.classList.add('hidden');
+    document.getElementById('detail-panel')?.classList.add('hidden');
+
+    state.platform = await getPlatform().catch(() => 'unknown');
+    state.isAppleSilicon = await getIsAppleSilicon().catch(() => false);
+    state.settings = await getSettings().catch(() => null);
+    await renderSetupModal(false);
+
+    // Track unsaved edits so closing the window can ask first.
+    const modal = document.getElementById('setup-modal');
+    state._settingsDirty = false;
+    const markDirty = () => { state._settingsDirty = true; };
+    modal.addEventListener('input', markDirty);
+    modal.addEventListener('change', markDirty);
+
+    await getCurrentWebviewWindow().onCloseRequested(async event => {
+        if (!state._settingsDirty) return;
+        event.preventDefault();
+        const choice = await askChoice(t('settings.unsaved'), [
+            { key: 'cancel', label: t('shotmap.edit.cancel') },
+            { key: 'discard', label: t('settings.discard') },
+            { key: 'save', label: t('settings.save'), primary: true },
+        ]);
+        if (choice === 'save') modal.querySelector('#setup-save-btn')?.click();
+        else if (choice === 'discard') {
+            state._settingsDirty = false;
+            await getCurrentWebviewWindow().destroy();
+        }
+    });
+}
+
+// Main window: apply settings saved in the Settings window without a restart.
+function applySettingsChange({ settings, language }) {
+    state.settings = settings;
+    applySyncButtonVisibility();
+    if (language && language !== getLang()) {
+        setLang(language);
+        onLangChange();
+    }
+}
+
 async function init() {
     if (isTrendsWindow) {
         await initTrendsWindow();
+        return;
+    }
+    if (isSettingsWindow) {
+        await initSettingsWindow();
         return;
     }
     document.getElementById('sync-btn').addEventListener('click', handleSync);
