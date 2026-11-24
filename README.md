@@ -124,12 +124,12 @@ Requires Visual Studio 2022 with C++ workload and Rust toolchain.
 
 ## Google Drive Backup
 
-Rounds can be exported to, and imported from, the app's private folder in your Google Drive (`drive.appdata` scope; the app cannot see other Drive files). This is manual only.
+Rounds can be exported to, and imported from, a backup file in a "GoBirdie Backups" folder in your Google Drive (`drive.file` scope; the app can only see files it creates). You choose the file name when exporting. This is manual only.
 
 **One-time setup (for building the app):**
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Google Drive API**.
-2. Configure the **OAuth consent screen**. While the app is in "Testing" status, add your Google account as a test user. Refresh tokens expire after 7 days in Testing status.
+2. Configure the **OAuth consent screen** (add the scope `https://www.googleapis.com/auth/drive.file`). While the app is in "Testing" status, add your Google account as a test user. Refresh tokens expire after 7 days in Testing status.
 3. Create an **OAuth client ID** of type **Desktop app**.
 4. Either paste the Client ID into **Settings → Backup (Google Drive)** at runtime, or set it at build time:
 
@@ -139,7 +139,7 @@ Rounds can be exported to, and imported from, the app's private folder in your G
    npm run tauri:build
    ```
 
-The refresh token is stored in the OS keychain. Nothing is stored in plain settings. Backup files are removable from Google Drive under *Manage apps → Delete hidden app data* after disconnecting.
+The refresh token is stored in the OS keychain. Nothing is stored in plain settings. Backup files are ordinary files in the "GoBirdie Backups" folder, so you can move or delete them in Google Drive.
 
 ## Architecture
 
