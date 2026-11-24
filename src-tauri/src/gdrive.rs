@@ -4,7 +4,6 @@
 //! - Only the refresh token is persisted, in the OS keychain. Access tokens live in memory.
 //! - Scope is `drive.appdata`, so the app only touches its own files (one JSON per round).
 
-use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,10 +17,10 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::ShellExt;
 
-use crate::models::GolfRound;
+use crate::file_backup;
 use crate::AppState;
 
 // Error codes returned to the frontend (mapped to i18n strings there).
@@ -36,10 +35,12 @@ pub const ERR_BUSY: &str = "gdrive_busy";
 pub const ERR_BROWSER: &str = "gdrive_browser";
 pub const ERR_SECURE_STORAGE: &str = "gdrive_secure_storage";
 pub const ERR_FILE_TOO_LARGE: &str = "gdrive_file_too_large";
+pub const ERR_INVALID_NAME: &str = "gdrive_invalid_name";
+pub const ERR_FILE_EXISTS: &str = "gdrive_file_exists";
 
 const KEYRING_SERVICE: &str = "com.gobirdie.desktop";
 const KEYRING_ACCOUNT: &str = "gdrive-refresh-token";
-const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
+const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
@@ -48,9 +49,8 @@ const DRIVE_UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files
 const AUTH_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
 pub(crate) const FORMAT_VERSION: u32 = 1;
-const FILE_PREFIX: &str = "round_";
-const FILE_SUFFIX: &str = ".json";
-const PROGRESS_EVENT: &str = "gdrive-progress";
+const FOLDER_NAME: &str = "GoBirdie Backups";
+const FOLDER_MIME: &str = "application/vnd.google-apps.folder";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -345,10 +345,16 @@ pub fn disconnect(_app: &AppHandle) -> Result<(), String> {
 
 // ── Drive REST client ────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct RemoteFile {
-    id: String,
-    name: String,
+/// A file or folder in Drive. Only files the app created (or opened via the picker) are visible
+/// under `drive.file`, which is why backups live in a folder the app creates.
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct RemoteFile {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "modifiedTime", default)]
+    pub modified_time: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -426,17 +432,17 @@ impl Drive {
         check(resp)
     }
 
-    fn list_files(&self) -> Result<Vec<RemoteFile>, String> {
+    /// Lists files matching a Drive query (`q`). Follows pagination.
+    fn list_files(&self, q: &str) -> Result<Vec<RemoteFile>, String> {
         let mut files = Vec::new();
         let mut page_token: Option<String> = None;
         loop {
             let token_for_page = page_token.clone();
             let resp = self.send(&|c, t| {
                 let mut req = c.get(DRIVE_FILES_URL).bearer_auth(t).query(&[
-                    ("spaces", "appDataFolder"),
-                    ("fields", "nextPageToken,files(id,name)"),
-                    ("pageSize", "1000"),
-                    ("q", "name contains 'round_'"),
+                    ("q", q),
+                    ("fields", "nextPageToken,files(id,name,modifiedTime,size)"),
+                    ("pageSize", "100"),
                 ]);
                 if let Some(p) = &token_for_page {
                     req = req.query(&[("pageToken", p.as_str())]);
@@ -453,14 +459,24 @@ impl Drive {
         Ok(files)
     }
 
-    /// Creates a new file (`existing == None`) or overwrites an existing one, via multipart upload.
-    fn upload(&self, name: &str, data: &[u8], existing: Option<&str>) -> Result<(), String> {
+    /// Creates a folder under My Drive and returns its id.
+    fn create_folder(&self, name: &str) -> Result<String, String> {
+        let body = serde_json::json!({ "name": name, "mimeType": FOLDER_MIME });
+        let resp = self.send(&|c, t| {
+            c.post(DRIVE_FILES_URL).bearer_auth(t).json(&body)
+        })?;
+        let created: RemoteFile = resp.json().map_err(|_| ERR_NETWORK.to_string())?;
+        Ok(created.id)
+    }
+
+    /// Creates a file in `parent` (or overwrites `existing`) via multipart upload. Returns its id.
+    fn upload(&self, name: &str, data: &[u8], parent: &str, existing: Option<&str>) -> Result<String, String> {
         let boundary = format!("gobirdie{}", random_urlsafe(12));
         let metadata = match existing {
             Some(_) => serde_json::json!({ "name": name, "mimeType": "application/json" }),
             None => serde_json::json!({
                 "name": name,
-                "parents": ["appDataFolder"],
+                "parents": [parent],
                 "mimeType": "application/json"
             }),
         };
@@ -473,7 +489,7 @@ impl Drive {
         let content_type = format!("multipart/related; boundary={boundary}");
         let existing = existing.map(str::to_string);
 
-        self.send(&|c, t| {
+        let resp = self.send(&|c, t| {
             let request = match &existing {
                 Some(id) => c
                     .patch(format!("{DRIVE_UPLOAD_URL}/{id}"))
@@ -485,7 +501,8 @@ impl Drive {
                 .header(CONTENT_TYPE, content_type.clone())
                 .body(body.clone())
         })?;
-        Ok(())
+        let created: RemoteFile = resp.json().map_err(|_| ERR_NETWORK.to_string())?;
+        Ok(created.id)
     }
 
     fn download(&self, file_id: &str) -> Result<Vec<u8>, String> {
@@ -523,171 +540,101 @@ fn check(resp: Response) -> Result<Response, String> {
     .to_string())
 }
 
-// ── Backup format and naming ─────────────────────────────────────────────────
+// ── Backup folder and file names ─────────────────────────────────────────────
 
-/// On-disk payload: one envelope per round file. Settings and feedback are never included.
-#[derive(Serialize, Deserialize)]
-struct BackupEnvelope {
-    format_version: u32,
-    #[serde(default)]
-    app_version: String,
-    #[serde(default)]
-    exported_at: String,
-    round: GolfRound,
-}
-
-#[derive(Serialize)]
-pub struct ExportResult {
-    pub uploaded: u32,
-    pub updated: u32,
-    pub failed: u32,
-    pub total: u32,
-}
-
-#[derive(Serialize)]
-pub struct ImportResult {
-    pub imported: u32,
-    pub skipped_existing: u32,
-    pub skipped_invalid: u32,
-    pub failed: u32,
-    pub total: u32,
-}
-
-/// Round ids come from FIT file hashes (hex), iPhone/Android sync (may contain '-').
-/// Only these characters are accepted so the Drive file name stays predictable.
+/// Round ids come from FIT file hashes (hex) or iPhone/Android sync (may contain '-' or '_').
 pub(crate) fn valid_round_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-fn file_name_for(round_id: &str) -> String {
-    format!("{FILE_PREFIX}{round_id}{FILE_SUFFIX}")
+/// Escapes a value for a Drive `q` string literal.
+fn q_literal(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
-fn round_id_from_name(name: &str) -> Option<String> {
-    let id = name.strip_prefix(FILE_PREFIX)?.strip_suffix(FILE_SUFFIX)?;
-    valid_round_id(id).then(|| id.to_string())
+/// Accepts a plain file name ending in .json, with no path separators.
+fn sanitize_file_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    let ok = !trimmed.is_empty()
+        && trimmed.len() <= 120
+        && !trimmed.contains(['/', '\\', '\0'])
+        && trimmed.to_lowercase().ends_with(".json");
+    if ok {
+        Ok(trimmed.to_string())
+    } else {
+        Err(ERR_INVALID_NAME.to_string())
+    }
 }
 
-/// Parses and validates one backup file. `expected_id` comes from the file name.
-fn parse_envelope(bytes: &[u8], expected_id: &str) -> Result<GolfRound, String> {
-    let envelope: BackupEnvelope = serde_json::from_slice(bytes).map_err(|_| "parse".to_string())?;
-    if envelope.format_version > FORMAT_VERSION {
-        return Err("newer_format".to_string());
-    }
-    if envelope.round.id != expected_id {
-        return Err("id_mismatch".to_string());
-    }
-    if envelope.round.start_ts <= 0 {
-        return Err("bad_start".to_string());
-    }
-    Ok(envelope.round)
-}
-
-fn emit_progress(app: &AppHandle, phase: &str, done: u32, total: u32) {
-    let _ = app.emit(
-        PROGRESS_EVENT,
-        serde_json::json!({ "phase": phase, "done": done, "total": total }),
+/// Finds the "GoBirdie Backups" folder in My Drive, creating it on first use.
+fn ensure_folder(drive: &Drive) -> Result<String, String> {
+    let q = format!(
+        "name = '{}' and mimeType = '{}' and 'root' in parents and trashed = false",
+        q_literal(FOLDER_NAME),
+        FOLDER_MIME
     );
+    if let Some(folder) = drive.list_files(&q)?.into_iter().next() {
+        return Ok(folder.id);
+    }
+    drive.create_folder(FOLDER_NAME)
 }
 
-// ── Export and import ────────────────────────────────────────────────────────
+// ── Export and import (one bundle file per backup) ───────────────────────────
 
-/// Uploads every round. Existing files are overwritten, so repeat exports are idempotent.
-pub fn export(app: &AppHandle) -> Result<ExportResult, String> {
+#[derive(Serialize)]
+pub struct ExportResult {
+    pub name: String,
+    pub count: u32,
+}
+
+/// Uploads all rounds as one file named `name` in the backup folder.
+/// An existing file with the same name is not overwritten; the user picks another name.
+pub fn export(app: &AppHandle, name: String) -> Result<ExportResult, String> {
     let _busy = BusyGuard::acquire()?;
+    let name = sanitize_file_name(&name)?;
     let drive = Drive::new(app)?;
     let state = app.state::<AppState>();
+    let folder = ensure_folder(&drive)?;
 
-    // Snapshot first so the store lock is never held during network I/O.
-    let rounds = state.store.lock().unwrap().all_rounds_full();
-    let existing: HashMap<String, String> = drive
-        .list_files()?
+    let clash = drive.list_files(&format!(
+        "name = '{}' and '{}' in parents and trashed = false",
+        q_literal(&name),
+        folder
+    ))?;
+    if !clash.is_empty() {
+        return Err(ERR_FILE_EXISTS.to_string());
+    }
+
+    let (bytes, count) = file_backup::bundle_bytes(&state)?;
+    drive.upload(&name, &bytes, &folder, None)?;
+    println!("[gdrive] exported {count} rounds to backup folder");
+    Ok(ExportResult { name, count })
+}
+
+/// Lists the backup files in the app's folder, newest first.
+pub fn list_backups(app: &AppHandle) -> Result<Vec<RemoteFile>, String> {
+    let drive = Drive::new(app)?;
+    let folder = ensure_folder(&drive)?;
+    let mut files: Vec<RemoteFile> = drive
+        .list_files(&format!(
+            "'{}' in parents and mimeType != '{}' and trashed = false",
+            folder, FOLDER_MIME
+        ))?
         .into_iter()
-        .filter_map(|f| round_id_from_name(&f.name).map(|id| (id, f.id)))
+        .filter(|f| f.name.to_lowercase().ends_with(".json"))
         .collect();
-
-    let total = rounds.len() as u32;
-    let (mut uploaded, mut updated, mut failed) = (0u32, 0u32, 0u32);
-    for (i, round) in rounds.into_iter().enumerate() {
-        let round_id = round.id.clone();
-        let envelope = BackupEnvelope {
-            format_version: FORMAT_VERSION,
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-            exported_at: chrono::Utc::now().to_rfc3339(),
-            round,
-        };
-        let data = serde_json::to_vec(&envelope).map_err(|_| ERR_NETWORK.to_string())?;
-        let file_id = existing.get(&round_id).map(String::as_str);
-        match drive.upload(&file_name_for(&round_id), &data, file_id) {
-            Ok(()) if file_id.is_some() => updated += 1,
-            Ok(()) => uploaded += 1,
-            // Revoked sign-in aborts; other per-round failures are counted and skipped.
-            Err(e) if e == ERR_AUTH_REVOKED || e == ERR_NOT_CONNECTED => return Err(e),
-            Err(_) => failed += 1,
-        }
-        emit_progress(app, "export", (i + 1) as u32, total);
-    }
-
-    println!("[gdrive] export finished: {uploaded} uploaded, {updated} updated, {failed} failed");
-    Ok(ExportResult { uploaded, updated, failed, total })
+    files.sort_by(|a, b| b.modified_time.cmp(&a.modified_time));
+    Ok(files)
 }
 
-/// Imports rounds from Drive. Existing rounds are skipped unless `overwrite` is set.
-pub fn import(app: &AppHandle, overwrite: bool) -> Result<ImportResult, String> {
+/// Downloads one chosen backup and imports it. Existing rounds are kept unless `overwrite` is set.
+pub fn import(app: &AppHandle, file_id: String, overwrite: bool) -> Result<file_backup::ImportFileResult, String> {
     let _busy = BusyGuard::acquire()?;
     let drive = Drive::new(app)?;
+    let bytes = drive.download(&file_id)?;
+    let json = String::from_utf8(bytes).map_err(|_| file_backup::ERR_INVALID.to_string())?;
     let state = app.state::<AppState>();
-
-    let remote = drive.list_files()?;
-    let mut local_ids: HashSet<String> = state.store.lock().unwrap().all_ids();
-
-    let total = remote.len() as u32;
-    let (mut imported, mut skipped_existing, mut skipped_invalid, mut failed) = (0u32, 0u32, 0u32, 0u32);
-    for (i, file) in remote.into_iter().enumerate() {
-        match round_id_from_name(&file.name) {
-            None => skipped_invalid += 1,
-            Some(round_id) => {
-                let exists = local_ids.contains(&round_id);
-                if exists && !overwrite {
-                    skipped_existing += 1;
-                } else {
-                    match drive.download(&file.id) {
-                        Err(e) if e == ERR_AUTH_REVOKED || e == ERR_NOT_CONNECTED => return Err(e),
-                        Err(_) => failed += 1,
-                        Ok(bytes) => match parse_envelope(&bytes, &round_id) {
-                            Err(_) => skipped_invalid += 1,
-                            Ok(round) => {
-                                // Overwrite replaces in place so the stored key (and any
-                                // FIT-hash key) is preserved; new rounds use the id key.
-                                let written = {
-                                    let store = state.store.lock().unwrap();
-                                    if exists {
-                                        store.update_round(&round_id, |r| {
-                                            *r = round;
-                                            Ok(())
-                                        }).map(|o| o.is_some())
-                                    } else {
-                                        store.save_by_id(&round_id, &round).map(|_| true)
-                                    }
-                                };
-                                match written {
-                                    Ok(true) => {
-                                        imported += 1;
-                                        local_ids.insert(round_id);
-                                    }
-                                    _ => failed += 1,
-                                }
-                            }
-                        },
-                    }
-                }
-            }
-        }
-        emit_progress(app, "import", (i + 1) as u32, total);
-    }
-
-    println!("[gdrive] import finished: {imported} imported, {skipped_existing} skipped, {skipped_invalid} invalid, {failed} failed");
-    Ok(ImportResult { imported, skipped_existing, skipped_invalid, failed, total })
+    file_backup::import_json(&state, &json, overwrite)
 }

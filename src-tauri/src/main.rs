@@ -240,13 +240,18 @@ async fn gdrive_disconnect(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn gdrive_export_rounds(app: AppHandle) -> Result<gdrive::ExportResult, String> {
-    run_blocking(app, |app| gdrive::export(&app)).await
+async fn gdrive_export_rounds(name: String, app: AppHandle) -> Result<gdrive::ExportResult, String> {
+    run_blocking(app, move |app| gdrive::export(&app, name)).await
 }
 
 #[tauri::command]
-async fn gdrive_import_rounds(overwrite: bool, app: AppHandle) -> Result<gdrive::ImportResult, String> {
-    run_blocking(app, move |app| gdrive::import(&app, overwrite)).await
+async fn gdrive_list_backups(app: AppHandle) -> Result<Vec<gdrive::RemoteFile>, String> {
+    run_blocking(app, |app| gdrive::list_backups(&app)).await
+}
+
+#[tauri::command]
+async fn gdrive_import_rounds(file_id: String, overwrite: bool, app: AppHandle) -> Result<file_backup::ImportFileResult, String> {
+    run_blocking(app, move |app| gdrive::import(&app, file_id, overwrite)).await
 }
 
 /// Opens a save dialog and writes the rounds file. `None` means the user cancelled.
@@ -711,6 +716,7 @@ fn main() {
             gdrive_connect,
             gdrive_disconnect,
             gdrive_export_rounds,
+            gdrive_list_backups,
             gdrive_import_rounds,
             export_rounds_file,
             import_rounds_file,

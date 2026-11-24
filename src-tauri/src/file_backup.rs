@@ -50,6 +50,20 @@ pub struct ImportFileResult {
     pub total: u32,
 }
 
+/// Serializes all rounds as a bundle. Used by Drive export; returns the bytes and the round count.
+pub fn bundle_bytes(state: &AppState) -> Result<(Vec<u8>, u32), String> {
+    let rounds = state.store.lock().unwrap().all_rounds_full();
+    let count = rounds.len() as u32;
+    let bundle = BundleOut {
+        format_version: FORMAT_VERSION,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        exported_at: chrono::Utc::now().to_rfc3339(),
+        rounds,
+    };
+    let json = serde_json::to_vec_pretty(&bundle).map_err(|_| ERR_WRITE.to_string())?;
+    Ok((json, count))
+}
+
 /// Opens a save dialog, then writes all rounds to the chosen file. `None` if cancelled.
 pub fn export_with_dialog(app: &AppHandle, state: &AppState) -> Result<Option<ExportFileResult>, String> {
     let default_name = format!("gobirdie-rounds-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S"));

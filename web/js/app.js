@@ -101,12 +101,16 @@ async function gdriveDisconnect() {
     return invoke('gdrive_disconnect');
 }
 
-async function gdriveExport() {
-    return invoke('gdrive_export_rounds');
+async function gdriveExport(name) {
+    return invoke('gdrive_export_rounds', { name });
 }
 
-async function gdriveImport(overwrite) {
-    return invoke('gdrive_import_rounds', { overwrite: !!overwrite });
+async function gdriveListBackups() {
+    return invoke('gdrive_list_backups');
+}
+
+async function gdriveImport(fileId, overwrite) {
+    return invoke('gdrive_import_rounds', { fileId, overwrite: !!overwrite });
 }
 
 async function exportRoundsFile() {
@@ -124,6 +128,7 @@ function toast(msg, isError = false) {
     el.textContent = msg;
     el.className = `fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-sm max-w-sm z-50 ${
         isError ? 'bg-red-700' : 'bg-gray-800'} text-white`;
+    el.style.zIndex = '300';   // above modal overlays (z-100) and dialogs (z-200)
     el.classList.remove('hidden');
     setTimeout(() => el.classList.add('hidden'), 3500);
 }
@@ -759,11 +764,27 @@ function zoomTimeline(holeFilter) {
     activeChart.update();
 }
 
+// Totals for a set of holes. Only holes with a recorded score (> 0) count, so unplayed holes add nothing.
+function nineTotals(holes, parMap) {
+    const played = holes.filter(h => h.score > 0);
+    const parOf = h => parMap[h.hole_number]?.par ?? 0;
+    const ydsOf = h => parMap[h.hole_number] ? Math.round(parMap[h.hole_number].distance_cm / 91.44) : 0;
+    const fwHoles = played.filter(h => parOf(h) !== 3);
+    return {
+        par: played.reduce((sum, h) => sum + parOf(h), 0),
+        score: played.reduce((sum, h) => sum + h.score, 0),
+        putts: played.reduce((sum, h) => sum + (h.putts || 0), 0),
+        yds: played.reduce((sum, h) => sum + ydsOf(h), 0),
+        shots: played.reduce((sum, h) => sum + h.shots.length, 0),
+        fwHit: fwHoles.filter(h => h.fairway_hit).length,
+        fwEligible: fwHoles.length,
+    };
+}
+
 function buildScorecard(sc) {
     const parMap = Object.fromEntries(sc.hole_definitions.map(h => [h.hole_number, h]));
-    // Sum par only for holes actually played
-    const scoredPar = sc.hole_scores.reduce((sum, hs) => sum + (parMap[hs.hole_number]?.par ?? 0), 0);
-    const rows = sc.hole_scores.map(hs => {
+
+    const holeRow = hs => {
         const def  = parMap[hs.hole_number];
         const par  = def?.par || 0;
         const dist = def ? Math.round(def.distance_cm / 91.44) : '—';
@@ -780,7 +801,33 @@ function buildScorecard(sc) {
             <td>${par === 3 ? '—' : (hs.fairway_hit ? '✓' : '✗')}</td>
             <td class="text-xs text-gray-400">${hs.shots.length}</td>
         </tr>`;
-    }).join('');
+    };
+
+    // Subtotal or total row. `label` is OUT, IN or TOTAL.
+    const totalRow = (label, tot) => {
+        const over = tot.score - tot.par;
+        return `
+        <tr class="font-bold bg-gray-50">
+            <td>${label}</td>
+            <td>${tot.par}</td>
+            <td></td>
+            <td>${tot.yds}</td>
+            <td><span class="${scoreClass(over)}">${tot.score} (${overParStr(over)})</span></td>
+            <td>${tot.putts}</td>
+            <td>${tot.fwEligible ? `${tot.fwHit}/${tot.fwEligible}` : '—'}</td>
+            <td class="text-xs font-normal text-gray-500">${tot.shots}</td>
+        </tr>`;
+    };
+
+    // One <tbody> per nine: its played holes, then its subtotal. A nine with no played holes is left out.
+    const nine = (holes, label) => {
+        const played = holes.filter(h => h.score > 0);
+        if (!played.length) return '';
+        return `<tbody>${played.map(holeRow).join('')}</tbody>
+                <tbody>${totalRow(label, nineTotals(played, parMap))}</tbody>`;
+    };
+    const front = sc.hole_scores.filter(h => h.hole_number <= 9);
+    const back  = sc.hole_scores.filter(h => h.hole_number > 9);
 
     return `
     <div class="bg-white rounded-xl shadow-sm border p-6">
@@ -808,13 +855,10 @@ function buildScorecard(sc) {
                 <thead>
                     <tr><th>${t('scorecard.hole')}</th><th>${t('scorecard.par')}</th><th>${t('scorecard.hdcp')}</th><th>${t('scorecard.yds')}</th><th>${t('scorecard.score')}</th><th>${t('scorecard.putts')}</th><th>${t('scorecard.fw')}</th><th>${t('scorecard.shots')}</th></tr>
                 </thead>
-                <tbody>${rows}</tbody>
+                ${nine(front, t('scorecard.out'))}
+                ${nine(back, t('scorecard.in'))}
                 <tfoot>
-                    <tr class="font-bold bg-gray-50">
-                        <td>${t('scorecard.total')}</td><td>${scoredPar}</td><td></td><td></td>
-                        <td>${sc.total_score} (${overParStr(sc.total_score - scoredPar)})</td>
-                        <td>${sc.total_putts}</td><td></td><td></td>
-                    </tr>
+                    ${totalRow(t('scorecard.total'), nineTotals(sc.hole_scores, parMap))}
                 </tfoot>
             </table>
         </div>
@@ -4117,16 +4161,17 @@ function buildGDriveSection(gd) {
             <span id="gdrive-status" class="text-xs text-gray-500"></span>
             <button id="gdrive-connect-btn" data-connected="${gd.connected ? '1' : '0'}" class="${btnCls}"></button>
         </div>
+        <p class="text-xs text-gray-400">${t('gdrive.reconnect')}</p>
+        <div>
+            <label class="text-xs font-medium text-gray-600">${t('gdrive.fileName')}</label>
+            <input id="gdrive-file-name" type="text" class="${inputCls}" value="gobirdie-rounds-${todayLocalStr()}.json">
+            <p class="text-xs text-gray-400 mt-1">${t('gdrive.folder')}</p>
+        </div>
         <div class="flex items-center gap-2">
             <button id="gdrive-export-btn" class="${btnCls} flex-1">${t('gdrive.export')}</button>
-            <button id="gdrive-import-btn" class="${btnCls} flex-1">${t('gdrive.import')}</button>
+            <button id="gdrive-import-btn" class="${btnCls} flex-1">${t('gdrive.chooseImport')}</button>
         </div>
-        <label class="flex items-center gap-2 text-xs text-gray-600">
-            <input id="gdrive-overwrite" type="checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600">
-            ${t('gdrive.overwrite')}
-        </label>
-        <p id="gdrive-progress" class="text-xs text-gray-400 hidden"></p>
-        <p class="text-xs text-gray-400">${t('gdrive.hiddenFiles')}</p>
+        <p id="gdrive-result" class="hidden text-xs break-all"></p>
     </div>`;
 }
 
@@ -4209,9 +4254,37 @@ function gdriveErrorText(e) {
         gdrive_browser: 'gdrive.err.browser',
         gdrive_secure_storage: 'gdrive.err.secure_storage',
         gdrive_file_too_large: 'gdrive.err.file_too_large',
+        gdrive_invalid_name: 'gdrive.err.invalid_name',
+        gdrive_file_exists: 'gdrive.err.file_exists',
+        file_invalid: 'file.err.invalid',
+        file_newer: 'file.err.newer',
+        file_too_large: 'file.err.too_large',
     };
     const code = String(e);
     return keys[code] ? t(keys[code]) : t('gdrive.err.generic', { error: code });
+}
+
+// Picker for the backups in the app's folder. Calls onPick with the chosen file.
+function openBackupPicker(files, onPick) {
+    const rows = files.map((f, i) => `
+        <button data-i="${i}" class="w-full text-left px-3 py-2 rounded-lg border hover:bg-gray-50">
+            <div class="text-sm text-gray-800 truncate">${escapeHtml(f.name)}</div>
+            <div class="text-xs text-gray-400">${f.modifiedTime ? new Date(f.modifiedTime).toLocaleString() : ''}</div>
+        </button>`).join('');
+    const m = openModal(`
+        <h4 class="font-semibold text-gray-700 mb-3">${t('gdrive.importTitle')}</h4>
+        <div class="space-y-2">${rows}</div>
+        <div class="flex justify-end mt-4">
+            <button data-cancel class="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">${t('shotmap.edit.cancel')}</button>
+        </div>`);
+    m.el.addEventListener('click', ev => {
+        if (ev.target === m.el || ev.target.closest('[data-cancel]')) { m.close(); return; }
+        const row = ev.target.closest('[data-i]');
+        if (!row) return;
+        const file = files[Number(row.dataset.i)];
+        m.close();
+        onPick(file);
+    });
 }
 
 function wireGDriveSection(modal) {
@@ -4220,8 +4293,14 @@ function wireGDriveSection(modal) {
     const connectBtn = el('gdrive-connect-btn');
     const exportBtn = el('gdrive-export-btn');
     const importBtn = el('gdrive-import-btn');
-    const progressEl = el('gdrive-progress');
+    const resultEl = el('gdrive-result');
     if (!connectBtn) return;
+
+    // Result stays in the dialog until the next action (toasts disappear quickly and sit under the dialog).
+    const showResult = (msg, isError = false) => {
+        resultEl.textContent = msg;
+        resultEl.className = `text-xs break-all ${isError ? 'text-red-600' : 'text-green-700'}`;
+    };
 
     let connected = connectBtn.dataset.connected === '1';
     const render = (busy = false) => {
@@ -4234,17 +4313,9 @@ function wireGDriveSection(modal) {
     // An auth failure means the stored sign-in is gone; reflect that in the UI.
     const handleError = (e) => {
         if (String(e) === 'gdrive_auth_revoked' || String(e) === 'gdrive_not_connected') connected = false;
+        showResult(gdriveErrorText(e), true);
         toast(gdriveErrorText(e), true);
     };
-
-    // Progress from the backend (one event per round).
-    if (gdriveUnlisten) gdriveUnlisten();
-    gdriveUnlisten = null;
-    listen('gdrive-progress', ev => {
-        const { phase, done, total } = ev.payload ?? {};
-        progressEl.textContent = t(phase === 'export' ? 'gdrive.progressExport' : 'gdrive.progressImport', { done, total });
-    }).then(unlisten => { gdriveUnlisten = unlisten; });
-
     render();
 
     connectBtn.addEventListener('click', async () => {
@@ -4280,43 +4351,60 @@ function wireGDriveSection(modal) {
         render();
     });
 
+    // Exports one bundle file, with the name the user typed, into the app's Drive folder.
     exportBtn.addEventListener('click', async () => {
         render(true);
-        progressEl.classList.remove('hidden');
-        progressEl.textContent = t('gdrive.progressExport', { done: 0, total: 0 });
         try {
-            const r = await gdriveExport();
-            toast(t('gdrive.export.done', { uploaded: r.uploaded, updated: r.updated, failed: r.failed }));
+            resultEl.classList.add('hidden');
+            const r = await gdriveExport(el('gdrive-file-name').value);
+            const msg = t('gdrive.exportSaved', { name: r.name, count: r.count });
+            showResult(msg);
+            toast(msg);
         } catch (e) {
             handleError(e);
         } finally {
-            progressEl.classList.add('hidden');
             render();
         }
     });
 
+    // Lists the backups in the app's folder, then imports the one the user picks.
     importBtn.addEventListener('click', async () => {
-        const overwrite = el('gdrive-overwrite').checked;
-        const choice = await askChoice(t('gdrive.confirm.import'), [
-            { key: 'no', label: t('shotmap.edit.no') },
-            { key: 'yes', label: t('shotmap.edit.yes'), primary: true },
-        ]);
-        if (choice !== 'yes') return;
         render(true);
-        progressEl.classList.remove('hidden');
-        progressEl.textContent = t('gdrive.progressImport', { done: 0, total: 0 });
+        let files = [];
         try {
-            const r = await gdriveImport(overwrite);
-            toast(t('gdrive.import.done', { imported: r.imported, skipped: r.skipped_existing + r.skipped_invalid }));
-            state.rounds = await getAllRounds();
-            renderRoundsList();
-            updateStats();
+            files = await gdriveListBackups();
         } catch (e) {
             handleError(e);
         } finally {
-            progressEl.classList.add('hidden');
             render();
         }
+        if (!files.length) {
+            showResult(t('gdrive.noBackups'), true);
+            toast(t('gdrive.noBackups'));
+            return;
+        }
+        openBackupPicker(files, async file => {
+            const choice = await askChoice(t('gdrive.confirm.import'), [
+                { key: 'cancel', label: t('shotmap.edit.cancel') },
+                { key: 'keep', label: t('file.import.keep') },
+                { key: 'overwrite', label: t('file.import.overwrite'), primary: true },
+            ]);
+            if (choice !== 'keep' && choice !== 'overwrite') return;
+            render(true);
+            try {
+                const r = await gdriveImport(file.id, choice === 'overwrite');
+                const msg = t('file.import.done', { imported: r.imported, skipped: r.skipped_existing + r.skipped_invalid });
+                showResult(msg);
+                toast(msg);
+                state.rounds = await getAllRounds();
+                renderRoundsList();
+                updateStats();
+            } catch (e) {
+                handleError(e);
+            } finally {
+                render();
+            }
+        });
     });
 }
 
