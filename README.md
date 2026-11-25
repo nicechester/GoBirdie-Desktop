@@ -34,6 +34,8 @@ Interactive map showing every shot as a colored line and dot, color-coded by clu
 ![Shot Map](images/shotmap1.png)
 ![Shot Map — hole detail](images/shotmap2.png)
 
+The scorecard strip above the map shows every hole's score. Click a hole to select it; click the total to show all holes.
+
 ### Club Performances Tab
 Breakdown of tee shots, approach shots, wedges, and putting with direction analysis (left/straight/right toward green), avg/max distance, elevation change, lie angle, and a club summary table.
 
@@ -93,6 +95,21 @@ The model outputs 15 pattern probabilities across four categories:
 Insights above the 65% threshold surface as warnings; above 80% as critical. Each insight has 👍/👎 feedback buttons — responses are stored locally in `feedback.json` and can be used to periodically fine-tune the model on real rounds.
 
 The model (`gobirdie_patterns.onnx`, ~229 KB) is bundled with the app and loaded at startup via the `tract-onnx` Rust crate. Inference runs in < 10ms on any modern desktop.
+
+### Trends
+Filter scoring, short game and fitness trends by date range, course, and 9 or 18 holes. The handicap index is an estimate calculated from your rounds, not an official handicap.
+
+Open it from View ▸ Trends; it opens in its own window.
+
+![Trends — handicap and scoring](images/trends1.png)
+![Trends — clubs and fitness](images/trends2.png)
+
+### Settings
+Set your name, handedness, watch or phone, language, strokes gained baseline and coaching options.
+
+Open it from the app menu (⌘,); it opens in its own window.
+
+![Settings](images/settings.png)
 
 ## Download
 
