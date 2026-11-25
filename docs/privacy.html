@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy: GoBirdie Desktop</title>
+  <meta name="description" content="How GoBirdie Desktop stores and uses your golf round data, and how the optional Google Drive backup works.">
+  <link rel="icon" href="images/icon.jpeg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="images/icon.jpeg" alt=""><span><span class="go">Go</span><span class="birdie">Birdie</span> Desktop</span></a>
+    <nav class="site">
+      <a href="index.html">Home</a>
+      <a href="terms.html">Terms</a>
+      <a href="https://github.com/nicechester/GoBirdie-Desktop">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap legal">
+    <h1>Privacy Policy</h1>
+    <p class="lead">Last updated: 24 November 2026</p>
+
+    <p>GoBirdie Desktop is a desktop app that analyzes golf rounds on your own computer. This policy explains what data the app handles and where it goes.</p>
+
+    <h2>Data stored on your computer</h2>
+    <ul>
+      <li>Your rounds: scores, shot positions, heart rate, altitude, stress and course information from your watch or phone. Stored in a local database in your user account:
+        <ul>
+          <li>macOS: <code>~/Library/Application Support/go-birdie-desktop/</code></li>
+          <li>Windows: the app data folder for your user account.</li>
+        </ul>
+      </li>
+      <li>App settings, such as your display name, device type and language. Stored in the same local database.</li>
+      <li>Google Drive sign-in: the refresh token is stored in your operating system's keychain (macOS Keychain or Windows Credential Manager). It is not stored in the app's settings file.</li>
+    </ul>
+
+    <h2>Optional Google Drive backup</h2>
+    <p>The app can back up and restore rounds through Google Drive. This is off until you connect it yourself.</p>
+    <ul>
+      <li>The app requests only the <code>drive.file</code> permission. It can access only the files it creates.</li>
+      <li>Backups are saved as JSON files in a folder called <strong>GoBirdie Backups</strong> in your My Drive. The app does not read other files in your Drive.</li>
+      <li>Backup files contain your round data. They do not contain your Google password, the sign-in token, or the app settings.</li>
+      <li>You can disconnect at any time in the app. Disconnecting revokes the sign-in token where Google allows it, and removes it from the keychain.</li>
+    </ul>
+
+    <h2>Requests to other services</h2>
+    <p>The app makes a few network requests. None of them send your name, email or account details.</p>
+    <ul>
+      <li><strong>Elevation lookups:</strong> to <em>api.opentopodata.org</em>. The coordinates of your shots and greens are sent to get elevation and slope values.</li>
+      <li><strong>Map tiles and fonts:</strong> map images and map labels are downloaded from OpenStreetMap and a public MapLibre font server. Your IP address is visible to those servers, as with any web page.</li>
+      <li><strong>Google Drive:</strong> only when you use the optional backup feature described above.</li>
+    </ul>
+    <p>The app does not include analytics, advertising, crash reporting or trackers.</p>
+
+    <h2>Ask AI</h2>
+    <p>The "Ask AI" feature builds a prompt from your round data. Where on-device AI is available, the analysis runs on your computer. Otherwise the prompt is copied to your clipboard, and you decide whether to paste it into another service. The app does not send it anywhere itself.</p>
+
+    <h2>Sync with phones and watches</h2>
+    <p>Apple Watch, iPhone and Android sync happens over your local Wi-Fi network. Round data is not sent to a server.</p>
+
+    <h2>Deleting your data</h2>
+    <ul>
+      <li><strong>Local rounds:</strong> delete the <code>go-birdie-desktop</code> folder listed above (quit the app first).</li>
+      <li><strong>Google Drive backups:</strong> delete the <strong>GoBirdie Backups</strong> folder in Google Drive.</li>
+      <li><strong>Google access:</strong> disconnect in the app, or remove the app under your Google Account's security settings.</li>
+    </ul>
+
+    <h2>Children</h2>
+    <p>The app is not directed at children under 13.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy changes, the updated version will be published on this page with a new date.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy can be raised as an issue on the <a href="https://github.com/nicechester/GoBirdie-Desktop/issues">GitHub repository</a>.</p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <a href="index.html">Home</a> &middot; <a href="terms.html">Terms</a> &middot; <a href="https://github.com/nicechester/GoBirdie-Desktop">GitHub</a>
+  </div>
+</footer>
+</body>
+</html>
