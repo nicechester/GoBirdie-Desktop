@@ -98,6 +98,14 @@ The model (`gobirdie_patterns.onnx`, ~229 KB) is bundled with the app and loaded
 
 Pre-built macOS and Windows binaries are available on the [Releases page](https://github.com/nicechester/GoBirdie-Desktop/releases).
 
+## Website
+
+The project home page is published with GitHub Pages from the `docs/` folder on `main`:
+
+- Home: https://nicechester.github.io/GoBirdie-Desktop/
+- Privacy policy: https://nicechester.github.io/GoBirdie-Desktop/privacy.html
+- Terms of use: https://nicechester.github.io/GoBirdie-Desktop/terms.html
+
 ## Sync Sources
 
 On first launch, select your device type:
