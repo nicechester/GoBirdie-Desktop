@@ -1014,30 +1014,74 @@ function offsetPoint(point, bearingDeg, distM) {
     return { lat: lat2 * 180 / Math.PI, lon: lon2 * 180 / Math.PI };
 }
 
+// Scorecard strip above the map. Each hole's score selects that hole (.hole-btn, data-hole=N);
+// the round total selects All (data-hole="all"). Unplayed holes are greyed out and disabled.
+function buildScoreStrip(sc) {
+    const holes = sc?.hole_scores ?? [];
+    const parMap = Object.fromEntries((sc?.hole_definitions ?? []).map(h => [h.hole_number, h]));
+    const holeCell = hs => {
+        const par = parMap[hs.hole_number]?.par ?? 0;
+        const played = hs.score > 0;
+        const over = hs.score - par;
+        return `
+        <button class="hole-btn flex-shrink-0 w-11 rounded-lg border border-gray-300 px-1 py-1 text-center hover:bg-blue-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            data-hole="${hs.hole_number}" data-unplayed="${played ? '0' : '1'}" ${played ? '' : 'disabled'}>
+            <div class="text-xs text-gray-400 leading-tight">${hs.hole_number}</div>
+            <div class="text-xs text-gray-400 leading-tight">${par || '—'}</div>
+            <div class="mt-0.5 text-sm font-bold leading-tight">${played ? `<span class="${scoreClass(over)} px-1 rounded">${hs.score}</span>` : '—'}</div>
+        </button>`;
+    };
+    const subtotalCell = (label, played) => {
+        const tot = nineTotals(played, parMap);
+        return `
+        <div class="flex-shrink-0 w-14 rounded-lg bg-gray-50 px-1 py-1 text-center">
+            <div class="text-xs font-semibold text-gray-500 leading-tight">${label}</div>
+            <div class="text-xs text-gray-400 leading-tight">${tot.par}</div>
+            <div class="mt-0.5 text-sm font-bold text-gray-700 leading-tight">${tot.score}</div>
+        </div>`;
+    };
+    // A nine is shown only if it has a played hole, so a 9-hole round shows just that nine.
+    const front = holes.filter(h => h.hole_number <= 9);
+    const back  = holes.filter(h => h.hole_number > 9);
+    const frontPlayed = front.some(h => h.score > 0);
+    const backPlayed  = back.some(h => h.score > 0);
+    const played = holes.filter(h => h.score > 0);
+    const total = nineTotals(holes, parMap);
+    const totalOver = total.score - total.par;
+
+    const cells = [];
+    if (frontPlayed) {
+        cells.push(...front.map(holeCell));
+        cells.push(subtotalCell(t('scorecard.out'), front.filter(h => h.score > 0)));
+    }
+    if (backPlayed) {
+        cells.push(...back.map(holeCell));
+        cells.push(subtotalCell(t('scorecard.in'), back.filter(h => h.score > 0)));
+    }
+    // The total is the All button; it starts selected, like the old All button.
+    cells.push(`
+        <button class="hole-btn flex-shrink-0 w-20 rounded-lg border px-2 py-1 text-center bg-blue-600 text-white border-blue-600 hover:bg-blue-700 transition"
+            data-hole="all" data-unplayed="0">
+            <div class="text-xs leading-tight">${t('shotmap.all')}</div>
+            <div class="text-xs leading-tight opacity-80">${total.par ? total.par : '—'}</div>
+            <div class="mt-0.5 text-sm font-bold leading-tight">${total.score} <span class="text-xs font-normal">(${overParStr(totalOver)})</span></div>
+        </button>`);
+    return `<div class="flex items-stretch gap-1.5 overflow-x-auto pb-1">${cells.join('')}</div>`;
+}
+
 function buildShotMap(round) {
     const sc = round.scorecard;
     const holes = sc?.hole_scores ?? [];
-
-    // Hole selector buttons
-    const holeButtons = holes.map(hs => `
-        <button class="hole-btn px-3 py-1 text-xs rounded-full border border-gray-300
-            hover:bg-blue-50 hover:border-blue-400 transition" data-hole="${hs.hole_number}">
-            H${hs.hole_number}
-        </button>`).join('');
+    const strip = buildScoreStrip(sc);
 
     return `
     <div class="flex flex-col gap-4" style="height: calc(100vh - 200px)">
-        <!-- Header with hole buttons -->
+        <!-- Header with the scorecard strip (hole selector) -->
         <div class="bg-white rounded-xl shadow-sm border p-4">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between mb-3">
                 <h3 class="text-lg font-semibold text-gray-700">${t('shotmap.title')}</h3>
-                <div class="flex items-center gap-2">
-                    <span class="text-xs text-gray-400">${t('shotmap.hole')}</span>
-                    <button class="hole-btn px-3 py-1 text-xs rounded-full bg-blue-600 text-white border border-blue-600"
-                        data-hole="all">${t('shotmap.all')}</button>
-                    ${holeButtons}
-                </div>
             </div>
+            ${strip}
             <div class="flex items-center gap-3 mt-3 min-h-[28px]">
                 <div id="shot-hole-summary" class="hidden text-sm font-medium text-gray-700"></div>
                 <button id="shot-edit-btn" class="hidden ml-auto px-3 py-1 text-xs rounded-full border border-gray-300"></button>
@@ -1641,7 +1685,7 @@ function exitEdit() {
     shotMapUi.edit = null;
     const bar = document.getElementById('shot-edit-bar');
     if (bar) { bar.classList.add('hidden'); bar.innerHTML = ''; bar.onclick = null; }
-    document.querySelectorAll('.hole-btn').forEach(b => { b.disabled = false; b.classList.remove('opacity-40'); });
+    document.querySelectorAll('.hole-btn').forEach(b => { b.disabled = b.dataset.unplayed === '1'; b.classList.remove('opacity-40'); });
     applyHoleVisibility(shotMapUi.hole);
     updateEditButton();
     updateHoleSummary();
