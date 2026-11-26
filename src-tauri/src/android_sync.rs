@@ -21,9 +21,16 @@ fn discover_mdns() -> Result<String, String> {
     while std::time::Instant::now() < deadline {
         match receiver.recv_timeout(std::time::Duration::from_millis(500)) {
             Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
-                if let Some(addr) = info.get_addresses().iter().next() {
+                let addrs = info.get_addresses();
+                // Prefer IPv4: the address set is unordered and may contain IPv6,
+                // which must be bracketed in a host:port string to form a valid URL.
+                let picked = addrs.iter().find(|a| a.is_ipv4()).or_else(|| addrs.iter().next());
+                if let Some(addr) = picked {
                     let port = info.get_port();
-                    let host = format!("{}:{}", addr, port);
+                    let host = match addr {
+                        std::net::IpAddr::V4(v4) => format!("{}:{}", v4, port),
+                        std::net::IpAddr::V6(v6) => format!("[{}]:{}", v6, port),
+                    };
                     let _ = mdns.shutdown();
                     return Ok(host);
                 }
