@@ -14,6 +14,7 @@ pub struct MobileRoundSummary {
 #[derive(Deserialize, Clone)]
 pub struct MobileRound {
     pub id: String,
+    #[serde(default)]
     pub source: String,
     pub course_name: String,
     pub started_at: String,
@@ -34,9 +35,13 @@ pub struct MobileHeartRateSample {
 pub struct MobileHoleScore {
     pub number: u8,
     pub par: u8,
+    // Android omits default-valued fields (unplayed holes have no strokes/putts/shots).
+    #[serde(default)]
     pub strokes: u8,
+    #[serde(default)]
     pub putts: u8,
     pub fairway_hit: Option<bool>,
+    #[serde(default)]
     pub shots: Vec<MobileShot>,
     pub green_center: Option<GpsPoint>,
 }
@@ -45,9 +50,14 @@ pub struct MobileHoleScore {
 pub struct MobileShot {
     pub location: GpsPoint,
     pub timestamp: String,
+    #[serde(default = "default_club")]
     pub club: String,
     pub altitude_meters: Option<f64>,
     pub heart_rate_bpm: Option<u32>,
+}
+
+fn default_club() -> String {
+    "unknown".to_string()
 }
 
 // ── Conversion ────────────────────────────────────────────────────────────────
